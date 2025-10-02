@@ -1,0 +1,455 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+
+const AppContext = createContext();
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within AppProvider');
+  }
+  return context;
+};
+
+export const AppProvider = ({ children }) => {
+  // Authentication state
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Notifications state
+  const [notifications, setNotifications] = useState([]);
+
+  // Users data (for admin)
+  const [users, setUsers] = useState([
+    { id: 1, name: 'John Doe', email: 'john@example.com', role: 'user', status: 'active', age: 30, weight: 75, height: 175, createdAt: new Date('2025-01-15') },
+    { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user', status: 'active', age: 28, weight: 62, height: 165, createdAt: new Date('2025-02-20') },
+    { id: 3, name: 'Dr. Mike Johnson', email: 'mike@example.com', role: 'doctor', status: 'active', createdAt: new Date('2025-01-10') },
+    { id: 4, name: 'Admin User', email: 'admin@example.com', role: 'admin', status: 'active', createdAt: new Date('2025-01-01') },
+    { id: 5, name: 'Sarah Williams', email: 'sarah@example.com', role: 'receptionist', status: 'active', createdAt: new Date('2025-02-01') },
+    { id: 6, name: 'Emily Chen', email: 'emily@example.com', role: 'dietitian', status: 'active', createdAt: new Date('2025-01-20') },
+  ]);
+
+  // Audit logs
+  const [auditLogs, setAuditLogs] = useState([]);
+
+  // Health data
+  const [healthData, setHealthData] = useState([]);
+
+  // Diet plans
+  const [dietPlans, setDietPlans] = useState([]);
+
+  // Appointments/Checkups
+  const [appointments, setAppointments] = useState([]);
+
+  // Medical reports
+  const [reports, setReports] = useState([]);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+        setIsAuthenticated(true);
+      } catch (error) {
+        localStorage.removeItem('user');
+      }
+    }
+  }, []);
+
+  // Authentication functions
+  const login = async (email, password, role) => {
+    try {
+      const response = await fetch('http://localhost:8080/api/auth/login', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          role,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const userData = {
+          id: data.user.id,
+          name: data.user.fullName,
+          email: data.user.email,
+          role: data.user.role,
+          phone: data.user.phone,
+          age: data.user.age,
+          status: data.user.status,
+        };
+        
+        setUser(userData);
+        setIsAuthenticated(true);
+        localStorage.setItem('user', JSON.stringify(userData));
+        
+        return Promise.resolve(userData);
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    }
+  };
+
+  const logout = () => {
+    setUser(null);
+    setIsAuthenticated(false);
+    localStorage.removeItem('user');
+  };
+
+  // Health data functions
+  const addHealthData = async (data) => {
+    try {
+      const response = await fetch('http://localhost:8080/healthdata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          age: data.age,
+          weight: data.weight,
+          height: data.height,
+          activityLevel: data.activityLevel,
+          allergies: data.allergies,
+          medicalHistory: data.medicalConditions || data.medicalHistory,
+          dietaryPreferences: data.dietaryPreferences,
+          healthGoal: data.goals || data.healthGoal,
+        }),
+      });
+
+      const savedData = await response.json();
+      setHealthData([...healthData, savedData]);
+      addNotification('success', 'Health data submitted successfully');
+      addAuditLog('create', 'health_data', `Health data created for user ${user.name}`);
+      return Promise.resolve(savedData);
+    } catch (error) {
+      console.error('Add health data error:', error);
+      throw error;
+    }
+  };
+
+  const updateHealthData = async (id, updates) => {
+    try {
+      const response = await fetch(`http://localhost:8080/healthdata/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          age: updates.age,
+          weight: updates.weight,
+          height: updates.height,
+          activityLevel: updates.activityLevel,
+          allergies: updates.allergies,
+          medicalHistory: updates.medicalConditions || updates.medicalHistory,
+          dietaryPreferences: updates.dietaryPreferences,
+          healthGoal: updates.goals || updates.healthGoal,
+        }),
+      });
+
+      const updatedData = await response.json();
+      setHealthData(healthData.map(data => 
+        data.id === id ? updatedData : data
+      ));
+      addNotification('success', 'Health data updated successfully');
+      addAuditLog('update', 'health_data', `Health data updated for user ${user.name}`);
+      return Promise.resolve(updatedData);
+    } catch (error) {
+      console.error('Update health data error:', error);
+      throw error;
+    }
+  };
+
+  const deleteHealthData = async (id) => {
+    try {
+      await fetch(`http://localhost:8080/healthdata/${id}`, {
+        method: 'DELETE',
+      });
+
+      setHealthData(healthData.filter(data => data.id !== id));
+      addNotification('success', 'Health data deleted successfully');
+      addAuditLog('delete', 'health_data', `Health data deleted for user ${user.name}`);
+      return Promise.resolve();
+    } catch (error) {
+      console.error('Delete health data error:', error);
+      throw error;
+    }
+  };
+
+  const getHealthDataByUserId = (userId) => {
+    return healthData.filter(data => data.userId === userId);
+  };
+
+  // Diet plan functions
+  const addDietPlan = (plan) => {
+    const newPlan = {
+      id: Date.now(),
+      ...plan,
+      createdAt: new Date(),
+    };
+    setDietPlans([...dietPlans, newPlan]);
+    addNotification('success', 'Diet plan created successfully');
+    return Promise.resolve(newPlan);
+  };
+
+  const updateDietPlan = (id, updates) => {
+    setDietPlans(dietPlans.map(plan => 
+      plan.id === id ? { ...plan, ...updates, updatedAt: new Date() } : plan
+    ));
+    addNotification('success', 'Diet plan updated successfully');
+    addAuditLog('update', 'diet_plan', `Diet plan ${id} updated`);
+  };
+
+  const deleteDietPlan = (id) => {
+    setDietPlans(dietPlans.filter(plan => plan.id !== id));
+    addNotification('success', 'Diet plan deleted successfully');
+    addAuditLog('delete', 'diet_plan', `Diet plan ${id} deleted`);
+    return Promise.resolve();
+  };
+
+  const getDietPlansByUserId = (userId) => {
+    return dietPlans.filter(plan => plan.userId === userId);
+  };
+
+  // Appointment functions
+  const scheduleAppointment = (appointment) => {
+    const newAppointment = {
+      id: Date.now(),
+      userId: user.id,
+      status: 'pending',
+      ...appointment,
+      createdAt: new Date(),
+    };
+    setAppointments([...appointments, newAppointment]);
+    addNotification('info', 'Appointment request submitted');
+    return Promise.resolve(newAppointment);
+  };
+
+  const updateAppointment = (id, updates) => {
+    setAppointments(appointments.map(apt => 
+      apt.id === id ? { ...apt, ...updates, updatedAt: new Date() } : apt
+    ));
+    addNotification('success', 'Appointment updated successfully');
+    addAuditLog('update', 'appointment', `Appointment ${id} updated`);
+    return Promise.resolve();
+  };
+
+  const updateAppointmentStatus = (id, status) => {
+    setAppointments(appointments.map(apt => 
+      apt.id === id ? { ...apt, status, updatedAt: new Date() } : apt
+    ));
+    addNotification('success', `Appointment ${status}`);
+    addAuditLog('update', 'appointment', `Appointment ${id} status changed to ${status}`);
+  };
+
+  const deleteAppointment = (id) => {
+    setAppointments(appointments.filter(apt => apt.id !== id));
+    addNotification('success', 'Appointment deleted successfully');
+    addAuditLog('delete', 'appointment', `Appointment ${id} deleted`);
+    return Promise.resolve();
+  };
+
+  // Report functions
+  const addReport = (report) => {
+    const newReport = {
+      id: Date.now(),
+      userId: user?.id || report.userId,
+      ...report,
+      createdAt: new Date(),
+    };
+    setReports([...reports, newReport]);
+    addNotification('info', 'New medical report available');
+    addAuditLog('create', 'report', `Medical report created for user ${report.userId}`);
+    return Promise.resolve(newReport);
+  };
+
+  const updateReport = (id, updates) => {
+    setReports(reports.map(report => 
+      report.id === id ? { ...report, ...updates, updatedAt: new Date() } : report
+    ));
+    addNotification('success', 'Report updated successfully');
+    addAuditLog('update', 'report', `Report ${id} updated`);
+    return Promise.resolve();
+  };
+
+  const deleteReport = (id) => {
+    setReports(reports.filter(report => report.id !== id));
+    addNotification('success', 'Report deleted successfully');
+    addAuditLog('delete', 'report', `Report ${id} deleted`);
+    return Promise.resolve();
+  };
+
+  // User management (admin)
+  const createUser = async (userData) => {
+    try {
+      const response = await fetch('http://localhost:8080/api/auth/signup', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fullName: userData.name,
+          email: userData.email,
+          password: userData.password || 'defaultPassword123',
+          role: userData.role,
+          phone: userData.phone || null,
+          age: userData.age || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Also update local state
+        const newUser = {
+          id: data.user.id,
+          name: data.user.fullName,
+          email: data.user.email,
+          role: data.user.role,
+          phone: data.user.phone,
+          age: data.user.age,
+          status: data.user.status,
+          createdAt: new Date(data.user.createdAt),
+        };
+        setUsers([...users, newUser]);
+        addNotification('success', 'User created successfully');
+        addAuditLog('create', 'user', `User ${userData.name} created with role ${userData.role}`);
+        return Promise.resolve(newUser);
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      console.error('Create user error:', error);
+      throw error;
+    }
+  };
+
+  const updateUser = (userId, updates) => {
+    setUsers(users.map(u => 
+      u.id === userId ? { ...u, ...updates, updatedAt: new Date() } : u
+    ));
+    addNotification('success', 'User updated successfully');
+    addAuditLog('update', 'user', `User ${userId} updated`);
+    return Promise.resolve();
+  };
+
+  const updateUserStatus = (userId, status) => {
+    setUsers(users.map(u => 
+      u.id === userId ? { ...u, status } : u
+    ));
+    addNotification('success', `User status updated to ${status}`);
+    addAuditLog('update', 'user', `User ${userId} status changed to ${status}`);
+  };
+
+  const updateUserRole = (userId, role) => {
+    setUsers(users.map(u => 
+      u.id === userId ? { ...u, role } : u
+    ));
+    addNotification('success', `User role updated to ${role}`);
+    addAuditLog('update', 'user', `User ${userId} role changed to ${role}`);
+  };
+
+  const deleteUser = (userId) => {
+    const user = users.find(u => u.id === userId);
+    setUsers(users.filter(u => u.id !== userId));
+    addNotification('success', 'User deleted successfully');
+    addAuditLog('delete', 'user', `User ${user?.name} deleted`);
+  };
+
+  // Notification functions
+  const addNotification = (type, message) => {
+    const newNotification = {
+      id: Date.now(),
+      type,
+      message,
+      read: false,
+      timestamp: new Date(),
+    };
+    setNotifications([newNotification, ...notifications]);
+  };
+
+  const markNotificationRead = (id) => {
+    setNotifications(notifications.map(n => 
+      n.id === id ? { ...n, read: true } : n
+    ));
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
+  };
+
+  // Audit log functions
+  const addAuditLog = (action, entity, description) => {
+    const log = {
+      id: Date.now(),
+      action,
+      entity,
+      description,
+      userId: user?.id,
+      userName: user?.name,
+      timestamp: new Date(),
+    };
+    setAuditLogs([log, ...auditLogs]);
+  };
+
+  const value = {
+    // Auth
+    user,
+    isAuthenticated,
+    login,
+    logout,
+    
+    // Health Data
+    healthData,
+    addHealthData,
+    updateHealthData,
+    deleteHealthData,
+    getHealthDataByUserId,
+    
+    // Diet Plans
+    dietPlans,
+    addDietPlan,
+    updateDietPlan,
+    deleteDietPlan,
+    getDietPlansByUserId,
+    
+    // Appointments
+    appointments,
+    scheduleAppointment,
+    updateAppointment,
+    updateAppointmentStatus,
+    deleteAppointment,
+    
+    // Reports
+    reports,
+    addReport,
+    updateReport,
+    deleteReport,
+    
+    // Users (admin)
+    users,
+    createUser,
+    updateUser,
+    updateUserStatus,
+    updateUserRole,
+    deleteUser,
+    
+    // Notifications
+    notifications,
+    addNotification,
+    markNotificationRead,
+    clearNotifications,
+
+    // Audit Logs
+    auditLogs,
+    addAuditLog,
+  };
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+};
