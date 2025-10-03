@@ -18,15 +18,8 @@ export const AppProvider = ({ children }) => {
   // Notifications state
   const [notifications, setNotifications] = useState([]);
 
-  // Users data (for admin)
-  const [users, setUsers] = useState([
-    { id: 1, name: 'John Doe', email: 'john@example.com', role: 'user', status: 'active', age: 30, weight: 75, height: 175, createdAt: new Date('2025-01-15') },
-    { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user', status: 'active', age: 28, weight: 62, height: 165, createdAt: new Date('2025-02-20') },
-    { id: 3, name: 'Dr. Mike Johnson', email: 'mike@example.com', role: 'doctor', status: 'active', createdAt: new Date('2025-01-10') },
-    { id: 4, name: 'Admin User', email: 'admin@example.com', role: 'admin', status: 'active', createdAt: new Date('2025-01-01') },
-    { id: 5, name: 'Sarah Williams', email: 'sarah@example.com', role: 'receptionist', status: 'active', createdAt: new Date('2025-02-01') },
-    { id: 6, name: 'Emily Chen', email: 'emily@example.com', role: 'dietitian', status: 'active', createdAt: new Date('2025-01-20') },
-  ]);
+  // Users data (fetched for admin)
+  const [users, setUsers] = useState([]);
 
   // Audit logs
   const [auditLogs, setAuditLogs] = useState([]);
@@ -60,6 +53,23 @@ export const AppProvider = ({ children }) => {
   // Authentication functions
   const login = async (email, password, role) => {
     try {
+      // Shortcut for hardcoded admin credentials
+      if (email?.toLowerCase() === 'admin@example.com' && password === 'admin123') {
+        const adminUser = {
+          id: 0,
+          name: 'Administrator',
+          email: 'admin@example.com',
+          role: 'admin',
+          phone: null,
+          age: null,
+          status: 'active',
+        };
+        setUser(adminUser);
+        setIsAuthenticated(true);
+        localStorage.setItem('user', JSON.stringify(adminUser));
+        return Promise.resolve(adminUser);
+      }
+
       const response = await fetch('http://localhost:8080/api/auth/login', {
         method: 'POST',
         headers: { 
@@ -286,6 +296,40 @@ export const AppProvider = ({ children }) => {
   };
 
   // User management (admin)
+  // Load all users (admin)
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('http://localhost:8080/api/users');
+      const data = await res.json();
+      if (data.success) {
+        const mapped = (data.users || []).map(u => ({
+          id: u.id,
+          name: u.fullName,
+          email: u.email,
+          role: u.role,
+          phone: u.phone,
+          age: u.age,
+          status: u.status,
+          createdAt: u.createdAt ? new Date(u.createdAt) : null,
+        }));
+        setUsers(mapped);
+        return mapped;
+      } else {
+        throw new Error(data.message || 'Failed to load users');
+      }
+    } catch (e) {
+      console.error('Fetch users error:', e);
+      throw e;
+    }
+  };
+
+  // Auto-load users when an admin signs in
+  useEffect(() => {
+    if (isAuthenticated && user?.role === 'admin') {
+      fetchUsers().catch(() => {});
+    }
+  }, [isAuthenticated, user?.role]);
+
   const createUser = async (userData) => {
     try {
       const response = await fetch('http://localhost:8080/api/auth/signup', {
@@ -330,36 +374,106 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  const updateUser = (userId, updates) => {
-    setUsers(users.map(u => 
-      u.id === userId ? { ...u, ...updates, updatedAt: new Date() } : u
-    ));
-    addNotification('success', 'User updated successfully');
-    addAuditLog('update', 'user', `User ${userId} updated`);
-    return Promise.resolve();
+  const updateUser = async (userId, updates) => {
+    try {
+      const payload = {
+        fullName: updates.name,
+        email: updates.email,
+        role: updates.role,
+        phone: updates.phone,
+        age: updates.age,
+        status: updates.status,
+        password: updates.password,
+      };
+      const res = await fetch(`http://localhost:8080/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const updatedUser = {
+          id: data.user.id,
+          name: data.user.fullName,
+          email: data.user.email,
+          role: data.user.role,
+          phone: data.user.phone,
+          age: data.user.age,
+          status: data.user.status,
+          createdAt: data.user.createdAt ? new Date(data.user.createdAt) : null,
+        };
+        setUsers(users.map(u => u.id === userId ? updatedUser : u));
+        addNotification('success', 'User updated successfully');
+        addAuditLog('update', 'user', `User ${userId} updated`);
+        return updatedUser;
+      } else {
+        throw new Error(data.message || 'Failed to update user');
+      }
+    } catch (e) {
+      console.error('Update user error:', e);
+      throw e;
+    }
   };
 
-  const updateUserStatus = (userId, status) => {
-    setUsers(users.map(u => 
-      u.id === userId ? { ...u, status } : u
-    ));
-    addNotification('success', `User status updated to ${status}`);
-    addAuditLog('update', 'user', `User ${userId} status changed to ${status}`);
+  const updateUserStatus = async (userId, status) => {
+    try {
+      const res = await fetch(`http://localhost:8080/api/users/${userId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUsers(users.map(u => u.id === userId ? { ...u, status: data.user.status } : u));
+        addNotification('success', `User status updated to ${status}`);
+        addAuditLog('update', 'user', `User ${userId} status changed to ${status}`);
+      } else {
+        throw new Error(data.message || 'Failed to update status');
+      }
+    } catch (e) {
+      console.error('Update status error:', e);
+      throw e;
+    }
   };
 
-  const updateUserRole = (userId, role) => {
-    setUsers(users.map(u => 
-      u.id === userId ? { ...u, role } : u
-    ));
-    addNotification('success', `User role updated to ${role}`);
-    addAuditLog('update', 'user', `User ${userId} role changed to ${role}`);
+  const updateUserRole = async (userId, role) => {
+    try {
+      const res = await fetch(`http://localhost:8080/api/users/${userId}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUsers(users.map(u => u.id === userId ? { ...u, role: data.user.role } : u));
+        addNotification('success', `User role updated to ${role}`);
+        addAuditLog('update', 'user', `User ${userId} role changed to ${role}`);
+      } else {
+        throw new Error(data.message || 'Failed to update role');
+      }
+    } catch (e) {
+      console.error('Update role error:', e);
+      throw e;
+    }
   };
 
-  const deleteUser = (userId) => {
-    const user = users.find(u => u.id === userId);
-    setUsers(users.filter(u => u.id !== userId));
-    addNotification('success', 'User deleted successfully');
-    addAuditLog('delete', 'user', `User ${user?.name} deleted`);
+  const deleteUser = async (userId) => {
+    try {
+      const res = await fetch(`http://localhost:8080/api/users/${userId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const deletedUser = users.find(u => u.id === userId);
+        setUsers(users.filter(u => u.id !== userId));
+        addNotification('success', 'User deleted successfully');
+        addAuditLog('delete', 'user', `User ${deletedUser?.name} deleted`);
+        return true;
+      } else {
+        throw new Error((data && data.message) || 'Failed to delete user');
+      }
+    } catch (e) {
+      console.error('Delete user error:', e);
+      throw e;
+    }
   };
 
   // Notification functions

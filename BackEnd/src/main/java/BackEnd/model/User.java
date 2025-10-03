@@ -29,8 +29,8 @@ public class User {
     private String password;
 
     @NotBlank(message = "Role is required")
-    @Pattern(regexp = "user|doctor|dietitian|receptionist", 
-             message = "Role must be one of: user, doctor, dietitian, receptionist")
+    @Pattern(regexp = "admin|user|doctor|dietitian|receptionist",
+             message = "Role must be one of: admin, user, doctor, dietitian, receptionist")
     private String role;
 
     private String phone;
