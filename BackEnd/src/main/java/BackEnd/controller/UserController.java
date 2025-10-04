@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:3000")
@@ -22,141 +21,247 @@ public class UserController {
     @Autowired
     private UserRepository userRepository;
 
-    // Helper to scrub password from user before returning
-    private User scrub(User user) {
-        if (user != null) user.setPassword(null);
-        return user;
-    }
-
+    // Get all users from database
     @GetMapping
-    public ResponseEntity<?> listUsers() {
-        List<User> users = userRepository.findAll();
-        users.forEach(u -> u.setPassword(null));
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("users", users);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<?> getAllUsers() {
+        try {
+            List<User> users = userRepository.findAll();
+            // Remove passwords from response
+            users.forEach(user -> user.setPassword(null));
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("users", users);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Failed to fetch users: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
     }
 
+    // Get user by ID
     @GetMapping("/{id}")
-    public ResponseEntity<?> getUser(@PathVariable Long id) {
-        Optional<User> userOpt = userRepository.findById(id);
-        if (userOpt.isEmpty()) throw new UserNotFoundException(id);
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("user", scrub(userOpt.get()));
-        return ResponseEntity.ok(response);
+    public ResponseEntity<?> getUserById(@PathVariable Long id) {
+        try {
+            User user = userRepository.findById(id)
+                    .orElseThrow(() -> new UserNotFoundException(id));
+            user.setPassword(null);
+            return ResponseEntity.ok(user);
+        } catch (UserNotFoundException e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Failed to fetch user: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
     }
 
+    // Create new user (admin only)
     @PostMapping
     public ResponseEntity<?> createUser(@Valid @RequestBody User newUser) {
         Map<String, Object> response = new HashMap<>();
 
-        // Prevent creating admin via this endpoint
-        if ("admin".equalsIgnoreCase(newUser.getRole())) {
-            response.put("success", false);
-            response.put("message", "Admin accounts cannot be created through this endpoint");
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
-        }
-
-        if (userRepository.existsByEmail(newUser.getEmail())) {
-            response.put("success", false);
-            response.put("message", "Email already registered");
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
-        }
-
-        // Normalize role to lowercase
-        newUser.setRole(newUser.getRole() != null ? newUser.getRole().toLowerCase() : null);
-
-        User saved = userRepository.save(newUser);
-        scrub(saved);
-        response.put("success", true);
-        response.put("message", "User created successfully");
-        response.put("user", saved);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
-
-    @PutMapping("/{id}")
-    public ResponseEntity<?> updateUser(@PathVariable Long id, @Valid @RequestBody User updated) {
-        Map<String, Object> response = new HashMap<>();
-
-        User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
-
-        // Don't allow changing email to an existing one
-        if (updated.getEmail() != null && !updated.getEmail().equalsIgnoreCase(user.getEmail())) {
-            if (userRepository.existsByEmail(updated.getEmail())) {
+        try {
+            // Check if email already exists
+            if (userRepository.existsByEmail(newUser.getEmail())) {
                 response.put("success", false);
                 response.put("message", "Email already registered");
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
             }
-            user.setEmail(updated.getEmail());
-        }
 
-        if (updated.getFullName() != null) user.setFullName(updated.getFullName());
-        if (updated.getPhone() != null) user.setPhone(updated.getPhone());
-        if (updated.getAge() != null) user.setAge(updated.getAge());
-        if (updated.getPassword() != null && !updated.getPassword().isBlank()) {
-            // Note: In production, hash the password.
-            user.setPassword(updated.getPassword());
-        }
-        if (updated.getRole() != null) user.setRole(updated.getRole().toLowerCase());
-        if (updated.getStatus() != null) user.setStatus(updated.getStatus());
+            // Validate role
+            String role = newUser.getRole().toLowerCase();
+            if (!role.equals("user") && !role.equals("doctor") && 
+                !role.equals("dietitian") && !role.equals("receptionist") && !role.equals("admin")) {
+                response.put("success", false);
+                response.put("message", "Invalid role. Must be one of: user, doctor, dietitian, receptionist, admin");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            }
 
-        User saved = userRepository.save(user);
-        scrub(saved);
-        response.put("success", true);
-        response.put("message", "User updated successfully");
-        response.put("user", saved);
-        return ResponseEntity.ok(response);
-    }
+            newUser.setRole(role);
 
-    @PatchMapping("/{id}/role")
-    public ResponseEntity<?> updateRole(@PathVariable Long id, @RequestBody Map<String, String> payload) {
-        Map<String, Object> response = new HashMap<>();
-        String role = payload.get("role");
-        if (role == null) {
+            // Save user
+            User savedUser = userRepository.save(newUser);
+            savedUser.setPassword(null);
+
+            response.put("success", true);
+            response.put("message", "User created successfully");
+            response.put("user", savedUser);
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+
+        } catch (Exception e) {
             response.put("success", false);
-            response.put("message", "Role is required");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            response.put("message", "Failed to create user: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
-        User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
-        user.setRole(role.toLowerCase());
-        User saved = userRepository.save(user);
-        scrub(saved);
-        response.put("success", true);
-        response.put("message", "Role updated successfully");
-        response.put("user", saved);
-        return ResponseEntity.ok(response);
     }
 
-    @PatchMapping("/{id}/status")
-    public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> payload) {
+    // Update user
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateUser(@PathVariable Long id, @Valid @RequestBody User updatedUser) {
         Map<String, Object> response = new HashMap<>();
-        String status = payload.get("status");
-        if (status == null) {
+
+        try {
+            User user = userRepository.findById(id)
+                    .orElseThrow(() -> new UserNotFoundException(id));
+
+            // Check if email is being changed and if it already exists
+            if (!user.getEmail().equals(updatedUser.getEmail()) && 
+                userRepository.existsByEmail(updatedUser.getEmail())) {
+                response.put("success", false);
+                response.put("message", "Email already registered");
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+            }
+
+            // Update fields
+            user.setFullName(updatedUser.getFullName());
+            user.setEmail(updatedUser.getEmail());
+            
+            // Only update password if provided
+            if (updatedUser.getPassword() != null && !updatedUser.getPassword().isEmpty()) {
+                user.setPassword(updatedUser.getPassword());
+            }
+            
+            user.setRole(updatedUser.getRole().toLowerCase());
+            user.setPhone(updatedUser.getPhone());
+            user.setAge(updatedUser.getAge());
+            user.setStatus(updatedUser.getStatus());
+
+            User savedUser = userRepository.save(user);
+            savedUser.setPassword(null);
+
+            response.put("success", true);
+            response.put("message", "User updated successfully");
+            response.put("user", savedUser);
+
+            return ResponseEntity.ok(response);
+
+        } catch (UserNotFoundException e) {
             response.put("success", false);
-            response.put("message", "Status is required");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to update user: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
-        User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
-        user.setStatus(status);
-        User saved = userRepository.save(user);
-        scrub(saved);
-        response.put("success", true);
-        response.put("message", "Status updated successfully");
-        response.put("user", saved);
-        return ResponseEntity.ok(response);
     }
 
+    // Delete user
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable Long id) {
         Map<String, Object> response = new HashMap<>();
-        if (!userRepository.existsById(id)) {
-            throw new UserNotFoundException(id);
+
+        try {
+            if (!userRepository.existsById(id)) {
+                throw new UserNotFoundException(id);
+            }
+
+            userRepository.deleteById(id);
+
+            response.put("success", true);
+            response.put("message", "User with id " + id + " has been deleted successfully");
+
+            return ResponseEntity.ok(response);
+
+        } catch (UserNotFoundException e) {
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to delete user: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
-        userRepository.deleteById(id);
-        response.put("success", true);
-        response.put("message", "User deleted successfully");
-        return ResponseEntity.ok(response);
+    }
+
+    // Update user status (activate/deactivate)
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<?> updateUserStatus(@PathVariable Long id, @RequestBody Map<String, String> statusData) {
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            User user = userRepository.findById(id)
+                    .orElseThrow(() -> new UserNotFoundException(id));
+
+            String newStatus = statusData.get("status");
+            if (newStatus == null || newStatus.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "Status is required");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            }
+
+            user.setStatus(newStatus);
+            User savedUser = userRepository.save(user);
+            savedUser.setPassword(null);
+
+            response.put("success", true);
+            response.put("message", "User status updated successfully");
+            response.put("user", savedUser);
+
+            return ResponseEntity.ok(response);
+
+        } catch (UserNotFoundException e) {
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to update user status: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    // Update user role
+    @PatchMapping("/{id}/role")
+    public ResponseEntity<?> updateUserRole(@PathVariable Long id, @RequestBody Map<String, String> roleData) {
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            User user = userRepository.findById(id)
+                    .orElseThrow(() -> new UserNotFoundException(id));
+
+            String newRole = roleData.get("role");
+            if (newRole == null || newRole.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "Role is required");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            }
+
+            // Validate role
+            String role = newRole.toLowerCase();
+            if (!role.equals("user") && !role.equals("doctor") && 
+                !role.equals("dietitian") && !role.equals("receptionist") && !role.equals("admin")) {
+                response.put("success", false);
+                response.put("message", "Invalid role. Must be one of: user, doctor, dietitian, receptionist, admin");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            }
+
+            user.setRole(role);
+            User savedUser = userRepository.save(user);
+            savedUser.setPassword(null);
+
+            response.put("success", true);
+            response.put("message", "User role updated successfully");
+            response.put("user", savedUser);
+
+            return ResponseEntity.ok(response);
+
+        } catch (UserNotFoundException e) {
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to update user role: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
     }
 }
