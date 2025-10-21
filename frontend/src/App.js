@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -11,19 +11,44 @@ import ScheduleCheckup from './pages/ScheduleCheckup';
 import Reports from './pages/Reports';
 import AdminDashboard from './pages/AdminDashboard';
 import ReceptionistDashboard from './pages/ReceptionistDashboard';
+import AppointmentManagement from './pages/appointment/AppointmentManagement';
 import DietitianDashboard from './pages/DietitianDashboard';
 import AuditLogs from './pages/AuditLogs';
+import DoctorDashboard from './pages/doctor/Dashboard';
+import DoctorAppointments from './pages/doctor/Appointments';
+import DoctorPatients from './pages/doctor/Patients';
+import DoctorPrescriptions from './pages/doctor/Prescriptions';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { isAuthenticated, user } = useApp();
+  const location = useLocation();
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Redirect based on user role
+  if (location.pathname === '/dashboard') {
+    if (user?.role === 'admin') {
+      return <Navigate to="/admin/dashboard" replace />;
+    } else if (user?.role === 'receptionist') {
+      return <Navigate to="/receptionist/dashboard" replace />;
+    } else if (user?.role === 'dietitian') {
+      return <Navigate to="/dietitian/dashboard" replace />;
+    } else if (user?.role === 'doctor') {
+      return <Navigate to="/doctor/dashboard" replace />;
+    }
+  }
+
+  // Check if user has required role
   if (allowedRoles && !allowedRoles.includes(user?.role)) {
-    return <Navigate to="/dashboard" replace />;
+    // Redirect to appropriate dashboard based on role
+    const redirectPath = user?.role === 'admin' ? '/admin/dashboard' : 
+                        user?.role === 'receptionist' ? '/receptionist/dashboard' :
+                        user?.role === 'dietitian' ? '/dietitian/dashboard' :
+                        user?.role === 'doctor' ? '/doctor/dashboard' : '/dashboard';
+    return <Navigate to={redirectPath} replace />;
   }
 
   return <Layout>{children}</Layout>;
@@ -82,6 +107,46 @@ function AppRoutes() {
 
       {/* Doctor Routes */}
       <Route
+        path="/doctor/dashboard"
+        element={
+          <ProtectedRoute allowedRoles={['doctor']}>
+            <DoctorDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/doctor/appointments"
+        element={
+          <ProtectedRoute allowedRoles={['doctor']}>
+            <DoctorAppointments />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/doctor/patients"
+        element={
+          <ProtectedRoute allowedRoles={['doctor']}>
+            <DoctorPatients />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/doctor/prescriptions"
+        element={
+          <ProtectedRoute allowedRoles={['doctor']}>
+            <DoctorPrescriptions />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/doctor/prescriptions/new"
+        element={
+          <ProtectedRoute allowedRoles={['doctor']}>
+            <DoctorPrescriptions isNew={true} />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/diet-plans"
         element={
           <ProtectedRoute allowedRoles={['doctor']}>
@@ -92,10 +157,18 @@ function AppRoutes() {
 
       {/* Receptionist Routes */}
       <Route
-        path="/receptionist/appointments"
+        path="/receptionist/dashboard"
         element={
           <ProtectedRoute allowedRoles={['receptionist']}>
             <ReceptionistDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/receptionist/appointments"
+        element={
+          <ProtectedRoute allowedRoles={['receptionist']}>
+            <AppointmentManagement />
           </ProtectedRoute>
         }
       />

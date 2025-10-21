@@ -26,13 +26,13 @@ const Navbar = () => {
       { path: '/reports', label: 'Reports' },
     ],
     doctor: [
-      { path: '/dashboard', label: 'Dashboard' },
-      { path: '/diet-plans', label: 'Diet Plans' },
-      { path: '/appointments', label: 'Appointments' },
-      { path: '/patients', label: 'Patients' },
+      { path: '/doctor/dashboard', label: 'Dashboard' },
+      { path: '/doctor/appointments', label: 'Appointments' },
+      { path: '/doctor/patients', label: 'Patients' },
+      { path: '/doctor/prescriptions', label: 'Prescriptions' },
     ],
     receptionist: [
-      { path: '/dashboard', label: 'Dashboard' },
+      { path: '/receptionist/dashboard', label: 'Dashboard' },
       { path: '/receptionist/appointments', label: 'Appointments' },
     ],
     dietitian: [

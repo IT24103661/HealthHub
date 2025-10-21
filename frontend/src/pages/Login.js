@@ -37,13 +37,13 @@ const Login = () => {
           navigate('/admin/users');
           break;
         case 'doctor':
-          navigate('/diet-plans');
+          navigate('/doctor/dashboard');
           break;
         case 'dietitian':
           navigate('/dietitian/diet-plans');
           break;
         case 'receptionist':
-          navigate('/receptionist/appointments');
+          navigate('/receptionist/dashboard');
           break;
         case 'user':
         default:

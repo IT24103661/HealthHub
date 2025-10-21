@@ -13,6 +13,18 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [healthData, setHealthData] = useState([]);
 
+  // Calculate derived health data
+  const latestHealthData = healthData.length > 0 ? healthData[healthData.length - 1] : null;
+  const previousHealthData = healthData.length > 1 ? healthData[healthData.length - 2] : null;
+  
+  // Calculate weight difference if we have at least 2 entries
+  const weightDifference = latestHealthData && previousHealthData 
+    ? (latestHealthData.weight - previousHealthData.weight).toFixed(1)
+    : null;
+  
+  // Count reports for the current user
+  const userReports = reports.filter(report => report.userId === user?.id);
+
   // Fetch health data for the logged-in user
   useEffect(() => {
     const fetchHealthData = async () => {
@@ -20,11 +32,14 @@ const Dashboard = () => {
         try {
           const response = await fetch('http://localhost:8080/healthdata');
           const data = await response.json();
-          // Filter data for current user
-          const userHealthData = data.filter(item => item.userId === user.id);
+          // Filter and sort data for current user by date (newest first)
+          const userHealthData = data
+            .filter(item => item.userId === user.id)
+            .sort((a, b) => new Date(b.date) - new Date(a.date));
           setHealthData(userHealthData);
         } catch (error) {
           console.error('Error fetching health data:', error);
+          toast.error('Failed to load health data');
         }
       }
     };
@@ -121,7 +136,9 @@ const Dashboard = () => {
             </div>
             <div>
               <p className="text-sm text-gray-600">Current Weight</p>
-              <p className="text-2xl font-bold text-gray-900">72 kg</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {latestHealthData ? `${latestHealthData.weight} kg` : 'N/A'}
+              </p>
             </div>
           </div>
         </Card>
@@ -133,7 +150,9 @@ const Dashboard = () => {
             </div>
             <div>
               <p className="text-sm text-gray-600">Progress</p>
-              <p className="text-2xl font-bold text-gray-900">-3 kg</p>
+              <p className={`text-2xl font-bold ${weightDifference ? (weightDifference > 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-900'}`}>
+                {weightDifference ? `${weightDifference > 0 ? '+' : ''}${weightDifference} kg` : 'N/A'}
+              </p>
             </div>
           </div>
         </Card>
@@ -157,7 +176,7 @@ const Dashboard = () => {
             </div>
             <div>
               <p className="text-sm text-gray-600">Reports</p>
-              <p className="text-2xl font-bold text-gray-900">3</p>
+              <p className="text-2xl font-bold text-gray-900">{userReports.length}</p>
             </div>
           </div>
         </Card>

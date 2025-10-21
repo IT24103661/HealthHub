@@ -1,5 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { format, isToday, isAfter, isBefore, addDays, parseISO, formatDistanceToNow, addHours } from 'date-fns';
+import { Calendar as BigCalendar, momentLocalizer } from 'react-big-calendar';
+import moment from 'moment';
+import 'react-big-calendar/lib/css/react-big-calendar.css';
+import { 
+  Calendar, Clock, CheckCircle, XCircle, Edit, Search, Filter, 
+  User, Phone, Mail, ChevronDown, Sun, Moon, Bell, 
+  Plus, Calendar as CalendarIcon, UserCheck, UserX, 
+  Clock as ClockIcon, MoreVertical, ArrowRight, CalendarCheck, 
+  CalendarClock, CalendarX, UserPlus, CalendarPlus, List 
+} from 'lucide-react';
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+// Components
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Table from '../components/Table';
@@ -7,302 +22,537 @@ import Badge from '../components/Badge';
 import Modal from '../components/Modal';
 import Select from '../components/Select';
 import Input from '../components/Input';
-import { Calendar, Clock, CheckCircle, XCircle, Edit, Search } from 'lucide-react';
-import { toast } from 'react-toastify';
+import Tabs from '../components/Tabs';
+
+// Initialize moment localizer
+const localizer = momentLocalizer(moment);
 
 const ReceptionistDashboard = () => {
-  const { appointments, users, updateAppointmentStatus, updateAppointment, deleteAppointment } = useApp();
+  const { user, appointments = [], patients = [], doctors = [], updateAppointment, deleteAppointment } = useApp();
+  
+  // State
   const [selectedAppointment, setSelectedAppointment] = useState(null);
-  const [showEditModal, setShowEditModal] = useState(false);
+  const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [editForm, setEditForm] = useState({
-    date: '',
-    time: '',
-    status: '',
-  });
+  const [darkMode, setDarkMode] = useState(false);
+  const [view, setView] = useState('week');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [showQuickContact, setShowQuickContact] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  
+  // Calculate summary statistics
+  const summaryStats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return {
+      today: appointments.filter(a => isToday(parseISO(a.date))).length,
+      pending: appointments.filter(a => a.status === 'pending').length,
+      confirmed: appointments.filter(a => a.status === 'confirmed').length,
+      completed: appointments.filter(a => a.status === 'completed').length,
+      cancelled: appointments.filter(a => a.status === 'cancelled').length,
+      upcoming: appointments.filter(a => 
+        parseISO(a.date) > today && a.status === 'confirmed'
+      ).length,
+    };
+  }, [appointments]);
 
-  const handleEditAppointment = (appointment) => {
-    setSelectedAppointment(appointment);
-    setEditForm({
-      date: new Date(appointment.date).toISOString().split('T')[0],
-      time: appointment.time,
-      status: appointment.status,
+  // Filter appointments based on search and filters
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter(appt => {
+      const matchesSearch = 
+        appt.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        appt.doctorName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        appt.notes?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesStatus = filterStatus === 'all' || appt.status === filterStatus;
+      
+      return matchesSearch && matchesStatus;
     });
-    setShowEditModal(true);
-  };
+  }, [appointments, searchTerm, filterStatus]);
 
-  const confirmEdit = async () => {
+  // Handle appointment actions
+  const handleAppointmentAction = async (appointmentId, action) => {
     try {
-      await updateAppointment(selectedAppointment.id, {
-        date: new Date(editForm.date),
-        time: editForm.time,
-        status: editForm.status,
-      });
-      toast.success('Appointment updated successfully');
-      setShowEditModal(false);
+      let status = action;
+      let message = '';
+      
+      switch(action) {
+        case 'confirm':
+          status = 'confirmed';
+          message = 'Appointment confirmed successfully';
+          break;
+        case 'cancel':
+          status = 'cancelled';
+          message = 'Appointment cancelled';
+          break;
+        case 'complete':
+          status = 'completed';
+          message = 'Appointment marked as completed';
+          break;
+        default:
+          break;
+      }
+      
+      await updateAppointment(appointmentId, { status });
+      toast.success(message);
+      
+      // Add notification
+      setNotifications(prev => [
+        {
+          id: Date.now(),
+          type: 'success',
+          message: `${message}: ${appointmentId}`,
+          timestamp: new Date()
+        },
+        ...prev
+      ].slice(0, 10)); // Keep only last 10 notifications
+      
     } catch (error) {
-      toast.error('Failed to update appointment');
+      toast.error(`Failed to ${action} appointment`);
+      console.error(error);
     }
   };
 
-  const handleConfirm = (id) => {
-    updateAppointmentStatus(id, 'confirmed');
-    toast.success('Appointment confirmed!');
-  };
-
-  const handleCancel = (id) => {
-    updateAppointmentStatus(id, 'cancelled');
-    toast.warning('Appointment cancelled');
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this appointment?')) {
-      await deleteAppointment(id);
-      toast.success('Appointment deleted');
+  // Handle drag and drop
+  const handleEventDrop = async ({ event, start, end }) => {
+    try {
+      await updateAppointment(event.id, {
+        date: start,
+        endTime: end
+      });
+      toast.success('Appointment rescheduled successfully');
+    } catch (error) {
+      toast.error('Failed to reschedule appointment');
+      console.error(error);
     }
   };
 
-  // Filter appointments
-  const filteredAppointments = appointments.filter(apt => {
-    const user = users.find(u => u.id === apt.userId);
-    const matchesSearch = user?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user?.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = filterStatus === 'all' || apt.status === filterStatus;
-    return matchesSearch && matchesStatus;
-  });
+  // Format events for calendar
+  const events = useMemo(() => {
+    return filteredAppointments.map(appt => ({
+      id: appt.id,
+      title: `${appt.patientName} - ${appt.doctorName}`,
+      start: new Date(appt.date),
+      end: appt.endTime ? new Date(appt.endTime) : addHours(new Date(appt.date), 1),
+      status: appt.status,
+      ...appt
+    }));
+  }, [filteredAppointments]);
 
-  const columns = [
-    {
-      header: 'Patient',
-      render: (row) => {
-        const user = users.find(u => u.id === row.userId);
-        return (
-          <div>
-            <p className="font-medium text-gray-900">{user?.name || 'Unknown'}</p>
-            <p className="text-sm text-gray-500">{user?.email}</p>
-          </div>
-        );
+  // Event style based on status
+  const eventStyleGetter = (event) => {
+    let backgroundColor = '';
+    
+    switch(event.status) {
+      case 'confirmed':
+        backgroundColor = '#10B981'; // green-500
+        break;
+      case 'pending':
+        backgroundColor = '#F59E0B'; // amber-500
+        break;
+      case 'cancelled':
+        backgroundColor = '#EF4444'; // red-500
+        break;
+      case 'completed':
+        backgroundColor = '#3B82F6'; // blue-500
+        break;
+      default:
+        backgroundColor = '#6B7280'; // gray-500
+    }
+
+    return {
+      style: {
+        backgroundColor,
+        borderRadius: '4px',
+        opacity: 0.8,
+        color: 'white',
+        border: '0px',
+        display: 'block',
+        padding: '2px 5px',
       },
-    },
-    {
-      header: 'Date',
-      render: (row) => new Date(row.date).toLocaleDateString('en-US', {
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      }),
-    },
-    {
-      header: 'Time',
-      accessor: 'time',
-    },
-    {
-      header: 'Type',
-      accessor: 'type',
-      render: (row) => (
-        <span className="capitalize">{row.type?.replace('-', ' ')}</span>
-      ),
-    },
-    {
-      header: 'Status',
-      accessor: 'status',
-      render: (row) => (
-        <Badge
-          variant={
-            row.status === 'confirmed'
-              ? 'success'
-              : row.status === 'pending'
-              ? 'warning'
-              : 'danger'
-          }
-        >
-          {row.status}
-        </Badge>
-      ),
-    },
-    {
-      header: 'Actions',
-      render: (row) => (
-        <div className="flex gap-2">
-          {row.status === 'pending' && (
-            <>
-              <Button
-                size="sm"
-                variant="success"
-                icon={CheckCircle}
-                onClick={() => handleConfirm(row.id)}
-              >
-                Confirm
-              </Button>
-              <Button
-                size="sm"
-                variant="danger"
-                icon={XCircle}
-                onClick={() => handleCancel(row.id)}
-              >
-                Cancel
-              </Button>
-            </>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            icon={Edit}
-            onClick={() => handleEditAppointment(row)}
-          >
-            Edit
-          </Button>
-        </div>
-      ),
-    },
-  ];
-
-  const stats = {
-    total: appointments.length,
-    pending: appointments.filter(a => a.status === 'pending').length,
-    confirmed: appointments.filter(a => a.status === 'confirmed').length,
-    cancelled: appointments.filter(a => a.status === 'cancelled').length,
+    };
   };
 
+  // Toggle dark mode
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  // Render the component
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Appointment Management</h1>
-        <p className="text-gray-600 mt-2">Manage patient appointments and schedules</p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <Card>
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-primary-100 rounded-lg">
-              <Calendar className="text-primary-600" size={24} />
+    <div className={`min-h-screen ${darkMode ? 'dark bg-gray-900 text-white' : 'bg-gray-50'}`}>
+      <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        {/* Page Title */}
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Receptionist Dashboard</h1>
+        
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <Card className="bg-white dark:bg-gray-800 shadow rounded-lg">
+            <div className="p-4">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                  <CalendarCheck className="h-6 w-6" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Today's Appointments</p>
+                  <p className="text-2xl font-semibold text-gray-900 dark:text-white">{summaryStats.today}</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-sm text-gray-600">Total Appointments</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+          </Card>
+          
+          <Card className="bg-white dark:bg-gray-800 shadow rounded-lg">
+            <div className="p-4">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                  <Clock className="h-6 w-6" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Pending Confirmations</p>
+                  <p className="text-2xl font-semibold text-gray-900 dark:text-white">{summaryStats.pending}</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-yellow-100 rounded-lg">
-              <Clock className="text-yellow-600" size={24} />
+          </Card>
+          
+          <Card className="bg-white dark:bg-gray-800 shadow rounded-lg">
+            <div className="p-4">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                  <UserCheck className="h-6 w-6" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Upcoming</p>
+                  <p className="text-2xl font-semibold text-gray-900 dark:text-white">{summaryStats.upcoming}</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-sm text-gray-600">Pending</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.pending}</p>
+          </Card>
+          
+          <Card className="bg-white dark:bg-gray-800 shadow rounded-lg">
+            <div className="p-4">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+                  <XCircle className="h-6 w-6" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Cancelled</p>
+                  <p className="text-2xl font-semibold text-gray-900 dark:text-white">{summaryStats.cancelled}</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <CheckCircle className="text-green-600" size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Confirmed</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.confirmed}</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-red-100 rounded-lg">
-              <XCircle className="text-red-600" size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Cancelled</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.cancelled}</p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card className="mb-6">
-        <div className="flex gap-4">
-          <div className="flex-1">
-            <Input
-              placeholder="Search by patient name or email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              icon={Search}
-            />
-          </div>
-          <Select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            options={[
-              { value: 'all', label: 'All Status' },
-              { value: 'pending', label: 'Pending' },
-              { value: 'confirmed', label: 'Confirmed' },
-              { value: 'cancelled', label: 'Cancelled' },
-            ]}
-            className="w-48"
-          />
+          </Card>
         </div>
-      </Card>
-
-      {/* Appointments Table */}
-      <Card title={`Appointments (${filteredAppointments.length})`}>
-        <Table columns={columns} data={filteredAppointments} />
-      </Card>
-
-      {/* Edit Modal */}
+        
+        {/* Main Content */}
+        <div className="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden">
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center space-x-2 mb-4 md:mb-0">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white">Appointment Calendar</h2>
+              <div className="flex space-x-1 border border-gray-200 dark:border-gray-700 rounded-md p-1">
+                {['day', 'week', 'month', 'agenda'].map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className={`px-3 py-1 text-sm rounded-md ${
+                      view === v 
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' 
+                        : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {v.charAt(0).toUpperCase() + v.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-2">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search className="h-4 w-4 text-gray-400" />
+                </div>
+                <Input
+                  type="text"
+                  placeholder="Search appointments..."
+                  className="pl-10"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              
+              <Select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                options={[
+                  { value: 'all', label: 'All Status' },
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'confirmed', label: 'Confirmed' },
+                  { value: 'completed', label: 'Completed' },
+                  { value: 'cancelled', label: 'Cancelled' }
+                ]}
+                className="w-full sm:w-40"
+              />
+            </div>
+          </div>
+          
+          <div className="p-4">
+            <div className="h-[600px]">
+              <BigCalendar
+                localizer={localizer}
+                events={events}
+                startAccessor="start"
+                endAccessor="end"
+                style={{ height: '100%' }}
+                view={view}
+                onView={setView}
+                date={currentDate}
+                onNavigate={setCurrentDate}
+                onSelectEvent={(event) => {
+                  setSelectedAppointment(event);
+                  setShowAppointmentModal(true);
+                }}
+                onEventDrop={handleEventDrop}
+                eventPropGetter={eventStyleGetter}
+                selectable
+                onSelectSlot={({ start, end }) => {
+                  setSelectedAppointment({
+                    start,
+                    end,
+                    status: 'pending'
+                  });
+                  setShowAppointmentModal(true);
+                }}
+                messages={{
+                  next: 'Next',
+                  previous: 'Prev',
+                  today: 'Today',
+                  month: 'Month',
+                  week: 'Week',
+                  day: 'Day',
+                  agenda: 'Agenda',
+                  date: 'Date',
+                  time: 'Time',
+                  event: 'Event',
+                  noEventsInRange: 'No appointments in this range.'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+        
+        {/* Appointment List View (for smaller screens) */}
+        <div className="mt-6 md:hidden">
+          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Upcoming Appointments</h2>
+          <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
+            <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+              {filteredAppointments
+                .filter(appt => isAfter(parseISO(appt.date), new Date()))
+                .slice(0, 5)
+                .map((appointment) => (
+                  <li key={appointment.id}>
+                    <div className="px-4 py-4 sm:px-6">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-medium text-blue-600 dark:text-blue-400 truncate">
+                          {appointment.patientName}
+                        </div>
+                        <div className="ml-2 flex-shrink-0 flex">
+                          <Badge 
+                            status={appointment.status}
+                            className="text-xs" 
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-2 sm:flex sm:justify-between">
+                        <div className="sm:flex">
+                          <p className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                            <CalendarIcon className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
+                            {format(parseISO(appointment.date), 'MMM d, yyyy')}
+                          </p>
+                          <p className="mt-2 flex items-center text-sm text-gray-500 dark:text-gray-400 sm:mt-0 sm:ml-6">
+                            <ClockIcon className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
+                            {format(parseISO(appointment.date), 'h:mm a')}
+                          </p>
+                        </div>
+                        <div className="mt-2 flex items-center text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
+                          <User className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
+                          Dr. {appointment.doctorName}
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              {filteredAppointments.length === 0 && (
+                <li className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">
+                  No upcoming appointments
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+      
+      {/* Appointment Modal */}
       <Modal
-        isOpen={showEditModal}
-        onClose={() => setShowEditModal(false)}
-        title="Edit Appointment"
-        size="md"
+        isOpen={showAppointmentModal}
+        onClose={() => {
+          setShowAppointmentModal(false);
+          setSelectedAppointment(null);
+        }}
+        title={selectedAppointment?.id ? 'Edit Appointment' : 'New Appointment'}
       >
         {selectedAppointment && (
           <div className="space-y-4">
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="font-semibold text-gray-900">
-                {users.find(u => u.id === selectedAppointment.userId)?.name}
-              </p>
-              <p className="text-sm text-gray-600">
-                {users.find(u => u.id === selectedAppointment.userId)?.email}
-              </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Patient
+                </label>
+                <Select
+                  value={selectedAppointment.patientId || ''}
+                  onChange={(e) => setSelectedAppointment({
+                    ...selectedAppointment,
+                    patientId: e.target.value,
+                    patientName: patients.find(p => p.id === e.target.value)?.name || ''
+                  })}
+                  options={[
+                    { value: '', label: 'Select Patient' },
+                    ...patients.map(patient => ({
+                      value: patient.id,
+                      label: patient.name
+                    }))
+                  ]}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Doctor
+                </label>
+                <Select
+                  value={selectedAppointment.doctorId || ''}
+                  onChange={(e) => setSelectedAppointment({
+                    ...selectedAppointment,
+                    doctorId: e.target.value,
+                    doctorName: doctors.find(d => d.id === e.target.value)?.name || ''
+                  })}
+                  options={[
+                    { value: '', label: 'Select Doctor' },
+                    ...doctors.map(doctor => ({
+                      value: doctor.id,
+                      label: doctor.name
+                    }))
+                  ]}
+                />
+              </div>
             </div>
 
-            <Input
-              label="Date"
-              type="date"
-              value={editForm.date}
-              onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
-            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Date
+                </label>
+                <Input
+                  type="date"
+                  value={selectedAppointment.date ? format(new Date(selectedAppointment.date), 'yyyy-MM-dd') : ''}
+                  onChange={(e) => setSelectedAppointment({
+                    ...selectedAppointment,
+                    date: e.target.value
+                  })}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Time
+                </label>
+                <Input
+                  type="time"
+                  value={selectedAppointment.time || ''}
+                  onChange={(e) => setSelectedAppointment({
+                    ...selectedAppointment,
+                    time: e.target.value
+                  })}
+                />
+              </div>
+            </div>
 
-            <Input
-              label="Time"
-              type="time"
-              value={editForm.time}
-              onChange={(e) => setEditForm({ ...editForm, time: e.target.value })}
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Status
+              </label>
+              <Select
+                value={selectedAppointment.status || 'pending'}
+                onChange={(e) => setSelectedAppointment({
+                  ...selectedAppointment,
+                  status: e.target.value
+                })}
+                options={[
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'confirmed', label: 'Confirmed' },
+                  { value: 'completed', label: 'Completed' },
+                  { value: 'cancelled', label: 'Cancelled' }
+                ]}
+              />
+            </div>
 
-            <Select
-              label="Status"
-              value={editForm.status}
-              onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-              options={[
-                { value: 'pending', label: 'Pending' },
-                { value: 'confirmed', label: 'Confirmed' },
-                { value: 'cancelled', label: 'Cancelled' },
-              ]}
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Notes
+              </label>
+              <textarea
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                rows={3}
+                value={selectedAppointment.notes || ''}
+                onChange={(e) => setSelectedAppointment({
+                  ...selectedAppointment,
+                  notes: e.target.value
+                })}
+              />
+            </div>
 
-            <div className="flex gap-4 mt-6">
-              <Button variant="primary" onClick={confirmEdit} className="flex-1">
-                Save Changes
-              </Button>
-              <Button variant="secondary" onClick={() => setShowEditModal(false)}>
+            <div className="flex justify-end space-x-3 pt-4">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowAppointmentModal(false);
+                  setSelectedAppointment(null);
+                }}
+              >
                 Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  try {
+                    if (selectedAppointment.id) {
+                      await updateAppointment(selectedAppointment.id, selectedAppointment);
+                      toast.success('Appointment updated successfully');
+                    } else {
+                      // Create new appointment
+                      await updateAppointment(
+                        `appt-${Date.now()}`,
+                        {
+                          ...selectedAppointment,
+                          id: `appt-${Date.now()}`,
+                          createdAt: new Date().toISOString()
+                        }
+                      );
+                      toast.success('Appointment created successfully');
+                    }
+                    setShowAppointmentModal(false);
+                    setSelectedAppointment(null);
+                  } catch (error) {
+                    toast.error('Failed to save appointment');
+                    console.error(error);
+                  }
+                }}
+              >
+                {selectedAppointment.id ? 'Update' : 'Create'} Appointment
               </Button>
             </div>
           </div>
