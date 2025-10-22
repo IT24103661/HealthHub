@@ -132,132 +132,128 @@ const AppointmentManagement = () => {
   // Create a new appointment
   const createAppointment = async (appointmentData) => {
     try {
+      const token = localStorage.getItem('token');
+      
+      // Create a copy of the appointment data to avoid mutating the original
+      const requestData = { ...appointmentData };
+      
+      // Format the dateTime to match backend expectations (yyyy-MM-dd HH:mm)
+      if (requestData.dateTime) {
+        const date = new Date(requestData.dateTime);
+        if (!isNaN(date.getTime())) {
+          // Format as yyyy-MM-dd HH:mm
+          const pad = num => num.toString().padStart(2, '0');
+          requestData.dateTime = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+      }
+      
+      console.log('Creating appointment with data:', requestData);
+      
       const response = await fetch('http://localhost:8080/api/appointments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(appointmentData)
+        credentials: 'include',
+        body: JSON.stringify(requestData, (key, value) => {
+          // Log the data being sent to the server
+          console.log(`Sending ${key}:`, value);
+          return value;
+        })
       });
+
+      console.log('Response status:', response.status);
       
-      const responseData = await response.json();
+      let responseData;
+      try {
+        responseData = await response.json();
+        console.log('Response data:', responseData);
+      } catch (jsonError) {
+        console.error('Error parsing JSON response:', jsonError);
+        const text = await response.text();
+        console.error('Raw response:', text);
+        throw new Error(`Failed to parse server response: ${text}`);
+      }
       
       if (!response.ok) {
-        throw new Error(responseData.message || 'Failed to create appointment');
+        console.error('API Error Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: responseData
+        });
+        throw new Error(responseData.message || `HTTP error! status: ${response.status}`);
       }
-      
-      if (!responseData.success) {
-        throw new Error(responseData.message || 'Failed to create appointment');
+
+      if (!responseData) {
+        throw new Error('No data returned from server');
       }
-      
-      // Add the new appointment to the local state
-      setAppointments(prevAppointments => [...prevAppointments, responseData.appointment]);
-      
-      return responseData.appointment;
-      
-    } catch (err) {
-      console.error('Error creating appointment:', err);
-      toast.error(err.message || 'Failed to create appointment');
-      throw err;
+
+      // Update local state with the new appointment
+      setAppointments(prev => [...prev, responseData]);
+      console.log('Appointment created successfully:', responseData);
+      return responseData;
+    } catch (error) {
+      console.error('Error in createAppointment:', {
+        error,
+        errorMessage: error.message,
+        stack: error.stack
+      });
+      throw error;
     }
   };
 
   // Update appointment function
   const updateAppointment = async (id, updates) => {
     try {
-      // Ensure ID is a number and valid
-      const appointmentId = Number(id);
-      if (isNaN(appointmentId) || appointmentId <= 0) {
-        console.error('Invalid appointment ID:', id);
-        throw new Error('Invalid appointment ID');
-      }
-
-      // Prepare the update data - exclude patientId as it shouldn't be updated
-      const { patientId, date, time, ...updateData } = updates;
+      const token = localStorage.getItem('token');
       
-      // If we have both date and time, combine them into a single datetime
-      if (date && time) {
-        try {
-          const [hours, minutes] = time.split(':');
-          const appointmentDate = new Date(date);
-          appointmentDate.setHours(parseInt(hours, 10), parseInt(minutes, 10));
-          updateData.appointmentDate = appointmentDate.toISOString();
-        } catch (e) {
-          console.error('Error formatting date/time:', e);
-          throw new Error('Invalid date or time format');
+      // Create a copy of the updates to avoid mutating the original
+      const requestData = { ...updates };
+      
+      // Format the dateTime to match backend expectations (yyyy-MM-dd HH:mm)
+      if (requestData.dateTime) {
+        const date = new Date(requestData.dateTime);
+        if (!isNaN(date.getTime())) {
+          // Format as yyyy-MM-dd HH:mm
+          const pad = num => num.toString().padStart(2, '0');
+          requestData.dateTime = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
         }
       }
       
-      console.log('Sending update for appointment:', {
-        id: appointmentId,
-        type: typeof appointmentId,
-        data: updateData
-      });
+      console.log('Updating appointment with data:', requestData);
       
-      const url = `http://localhost:8080/api/appointments/${appointmentId}`;
-      console.log('Request URL:', url);
-      
-      const response = await fetch(url, {
+      const response = await fetch(`http://localhost:8080/api/appointments/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Accept': 'application/json'
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(updateData)
+        credentials: 'include',
+        body: JSON.stringify(requestData, (key, value) => {
+          console.log(`Sending ${key}:`, value);
+          return value;
+        })
       });
-      
-      let responseData;
-      try {
-        responseData = await response.json();
-        console.log('Update response:', {
-          status: response.status,
-          statusText: response.statusText,
-          data: responseData
-        });
-      } catch (e) {
-        console.error('Error parsing response:', e);
-        throw new Error('Invalid response from server');
-      }
+
+      const responseData = await response.json();
       
       if (!response.ok) {
-        const errorMsg = responseData?.message || response.statusText || 'Failed to update appointment';
-        console.error('Update failed:', errorMsg);
-        throw new Error(errorMsg);
+        console.error('API Error Response:', responseData);
+        throw new Error(responseData.message || `HTTP error! status: ${response.status}`);
       }
-      
-      if (responseData.success === false) {
-        const errorMsg = responseData.message || 'Failed to update appointment';
-        console.error('Update failed (success=false):', errorMsg);
-        throw new Error(errorMsg);
-      }
-      
-      // Update the local state with the updated appointment
-      setAppointments(prevAppointments => 
-        prevAppointments.map(apt => 
-          Number(apt.id) === appointmentId ? { 
-            ...apt, 
-            ...(responseData.appointment || responseData),
-            // Update the formatted date for display
-            formattedDate: responseData.appointment?.appointmentDate ? 
-              format(new Date(responseData.appointment.appointmentDate), 'MMM d, yyyy') : apt.formattedDate,
-            formattedTime: responseData.appointment?.appointmentDate ?
-              format(new Date(responseData.appointment.appointmentDate), 'h:mm a') : apt.formattedTime
-          } : apt
-        )
+
+      // Update local state with the updated appointment
+      setAppointments(prev => 
+        prev.map(appt => (appt.id === id || appt._id === id) ? responseData : appt)
       );
-      
-      toast.success('Appointment updated successfully');
-      return responseData.appointment || responseData;
-      
-    } catch (err) {
-      console.error('Error updating appointment:', err);
-      toast.error(err.message || 'Failed to update appointment');
-      throw err;
+      return responseData;
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      throw error;
     }
   };
-  
+
   // Delete appointment function
   const deleteAppointment = async (id) => {
     try {
@@ -272,16 +268,19 @@ const AppointmentManagement = () => {
         throw new Error('Failed to delete appointment');
       }
       
-      setAppointments(appointments.filter(apt => apt.id !== id));
+      setAppointments(appointments.filter(apt => 
+        String(apt.id) !== String(id) && 
+        String(apt._id) !== String(id)
+      ));
       toast.success('Appointment deleted successfully');
       
-    } catch (err) {
-      console.error('Error deleting appointment:', err);
+    } catch (error) {
+      console.error('Error deleting appointment:', error);
       toast.error('Failed to delete appointment');
-      throw err;
+      throw error;
     }
   };
-  
+
   // Format appointment data for the table
   const formattedAppointments = useMemo(() => {
     return appointments.map(appt => {
@@ -317,7 +316,7 @@ const AppointmentManagement = () => {
         try {
           const date = new Date(appt.appointmentDate);
           if (!isNaN(date.getTime())) {
-            formattedDate = format(date, 'MMM d, yyyy h:mm a');
+            formattedDate = format(date, 'MMM d, yyyy');
           }
         } catch (e) {
           console.error('Error formatting date:', e);
@@ -496,7 +495,7 @@ const AppointmentManagement = () => {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center p-6 max-w-md mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md">
           <div className="text-red-500 text-4xl mb-4">⚠️</div>
-          <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">Error Loading Data</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Error Loading Data</h2>
           <p className="text-gray-600 dark:text-gray-300 mb-4">{error}</p>
           <button
             onClick={() => window.location.reload()}
@@ -603,6 +602,52 @@ const AppointmentManagement = () => {
     console.log('Setting selected appointment:', updatedAppointment);
     setSelectedAppointment(updatedAppointment);
     setIsEditing(true);
+    setShowAppointmentModal(true);
+  };
+
+  // Generate time slots from 8:00 AM to 5:00 PM in 30-minute intervals
+  const generateTimeSlots = () => {
+    const slots = [];
+    for (let hour = 8; hour <= 17; hour++) {
+      for (let minute of ['00', '30']) {
+        if (hour === 17 && minute === '30') break; // Skip 17:30
+        const time = `${hour.toString().padStart(2, '0')}:${minute}`;
+        slots.push({ value: time, label: `${hour > 12 ? hour - 12 : hour}:${minute} ${hour >= 12 ? 'PM' : 'AM'}` });
+      }
+    }
+    return slots;
+  };
+
+  const timeSlots = generateTimeSlots();
+
+  // Handle new appointment button click
+  const handleNewAppointment = () => {
+    const now = new Date();
+    // Round up to nearest 30 minutes
+    const minutes = now.getMinutes();
+    const roundedMinutes = Math.ceil(minutes / 30) * 30;
+    const time = new Date(now);
+    
+    if (roundedMinutes === 60) {
+      time.setHours(now.getHours() + 1);
+      time.setMinutes(0);
+    } else {
+      time.setMinutes(roundedMinutes);
+    }
+    
+    // Format time as HH:MM
+    const formattedTime = `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+    
+    setSelectedAppointment({
+      patientId: '',
+      doctorId: '',
+      date: format(now, 'yyyy-MM-dd'),
+      time: formattedTime,
+      type: 'checkup',
+      notes: '',
+      status: 'scheduled'
+    });
+    setIsEditing(false);
     setShowAppointmentModal(true);
   };
 
@@ -913,6 +958,120 @@ const AppointmentManagement = () => {
     },
   ];
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!selectedAppointment) {
+      console.error('No selected appointment');
+      return;
+    }
+    
+    // Basic validation
+    if (!selectedAppointment.patientId) {
+      toast.error('Please select a patient');
+      return;
+    }
+    
+    if (!selectedAppointment.doctorId) {
+      toast.error('Please select a doctor');
+      return;
+    }
+    
+    if (!selectedAppointment.date || !selectedAppointment.time) {
+      toast.error('Please select both date and time');
+      return;
+    }
+    
+    try {
+      console.log('Form submission started');
+      
+      // Ensure we have valid date and time strings
+      if (!selectedAppointment.date || !selectedAppointment.time) {
+        throw new Error('Date and time are required');
+      }
+      
+      // Get date and time from the form
+      const dateStr = selectedAppointment.date;
+      const timeStr = selectedAppointment.time;
+      
+      if (!dateStr || !timeStr) {
+        throw new Error('Both date and time are required');
+      }
+      
+      // Parse the date and time components
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      
+      // Create a date object in local time
+      const date = new Date(year, month - 1, day, hours, minutes);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid date or time format');
+      }
+      
+      // Format as ISO string (this will include timezone offset)
+      const formattedDateTime = date.toISOString();
+      
+      console.log('Formatted dateTime for backend:', {
+        inputDate: dateStr,
+        inputTime: timeStr,
+        jsDate: date.toString(),
+        formattedDateTime,
+        timestamp: date.getTime(),
+        isoString: date.toISOString()
+      });
+      
+      // Convert string IDs to numbers
+      const patientId = Number(selectedAppointment.patientId);
+      const doctorId = Number(selectedAppointment.doctorId);
+      
+      // Validate that IDs are valid numbers
+      if (isNaN(patientId) || isNaN(doctorId)) {
+        throw new Error('Invalid patient or doctor ID format');
+      }
+      
+      // Format the request to match backend DTO
+      const appointmentData = {
+        patientId: patientId,
+        doctorId: doctorId,
+        appointmentDate: formattedDateTime, // Full ISO-8601 formatted date
+        type: selectedAppointment.type || 'checkup',
+        notes: selectedAppointment.notes || '',
+        status: (selectedAppointment.status || 'scheduled').toUpperCase()
+      };
+      
+      console.log('Sending to backend:', JSON.stringify(appointmentData, null, 2));
+
+      console.log('Prepared appointment data:', JSON.stringify(appointmentData, null, 2));
+      
+      if (isEditing && selectedAppointment.id) {
+        console.log('Updating existing appointment');
+        await updateAppointment(selectedAppointment.id, appointmentData);
+        toast.success('Appointment updated successfully');
+      } else {
+        console.log('Creating new appointment');
+        await createAppointment(appointmentData);
+        toast.success('Appointment created successfully');
+      }
+      
+      // Close the modal and refresh the appointments list
+      setShowAppointmentModal(false);
+      setSelectedAppointment(null);
+      await fetchAppointments();
+      
+    } catch (error) {
+      console.error('Error in handleSubmit:', {
+        error,
+        errorMessage: error.message,
+        stack: error.stack
+      });
+      
+      const errorMessage = error.response?.data?.message || 
+                         error.message || 
+                         'Failed to save appointment. Please check the console for details.';
+      toast.error(`Error: ${errorMessage}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
@@ -961,11 +1120,7 @@ const AppointmentManagement = () => {
               </Button>
               
               <Button
-                onClick={() => {
-                  setSelectedAppointment(null);
-                  setIsEditing(false);
-                  setShowAppointmentModal(true);
-                }}
+                onClick={handleNewAppointment}
                 className="px-4 py-2 text-sm"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -1043,96 +1198,39 @@ const AppointmentManagement = () => {
         {selectedAppointment && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {isEditing ? (
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Patient Information</h3>
-                    <div className="mt-1">
-                      <div className="flex items-center space-x-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <div className="h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400 text-lg font-medium">
-                          {selectedAppointment.patient?.name?.charAt(0) || 'P'}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-lg font-medium text-gray-900 dark:text-white">
-                            {selectedAppointment.patient?.name || 
-                             selectedAppointment.patient?.fullName ||
-                             (selectedAppointment.patient?.firstName || selectedAppointment.patient?.lastName 
-                               ? `${selectedAppointment.patient.firstName || ''} ${selectedAppointment.patient.lastName || ''}`.trim()
-                               : selectedAppointment.patient?.email || `Patient ${selectedAppointment.patient?.id || selectedAppointment.patient?._id}`)}
-                          </p>
-                          <div className="flex flex-wrap gap-x-4 mt-1">
-                            {selectedAppointment.patient?.email && (
-                              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center">
-                                <Mail className="h-4 w-4 mr-1" />
-                                {selectedAppointment.patient.email}
-                              </p>
-                            )}
-                            {selectedAppointment.patient?.phone && (
-                              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center">
-                                <Phone className="h-4 w-4 mr-1" />
-                                {selectedAppointment.patient.phone}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <input 
-                          type="hidden" 
-                          name="patientId" 
-                          value={selectedAppointment.patient?.id || selectedAppointment.patient?._id || ''} 
-                        />
-                      </div>
-                    </div>
-                  </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Select Patient *
+                  </label>
+                  <Select
+                    value={selectedAppointment.patientId || ''}
+                    onChange={(e) => {
+                      const patientId = e.target.value;
+                      const selectedPatient = patients.find(p => 
+                        p.id === patientId || p._id === patientId
+                      );
+                      setSelectedAppointment(prev => ({
+                        ...prev,
+                        patientId,
+                        patient: selectedPatient || null
+                      }));
+                    }}
+                    options={[
+                      { value: '', label: 'Select a patient', disabled: true },
+                      ...patients.map(patient => ({
+                        value: patient.id || patient._id,
+                        label: patient.name || patient.fullName || 
+                              (patient.firstName || patient.lastName 
+                                ? `${patient.firstName || ''} ${patient.lastName || ''}`.trim() 
+                                : patient.email || `Patient ${patient.id || patient._id}`)
+                      }))
+                    ]}
+                    className="w-full"
+                    required
+                  />
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Select Patient
-                    </label>
-                    <Select
-                      value={selectedAppointment.patientId || (selectedAppointment.patient?.id || selectedAppointment.patient?._id) || ''}
-                      onChange={(e) => {
-                        const selectedPatient = patients.find(p => 
-                          p.id?.toString() === e.target.value.toString() || 
-                          p._id?.toString() === e.target.value.toString()
-                        );
-                        
-                        if (selectedPatient) {
-                          const displayName = selectedPatient.name || 
-                                           selectedPatient.fullName ||
-                                           (selectedPatient.firstName || selectedPatient.lastName 
-                                             ? `${selectedPatient.firstName || ''} ${selectedPatient.lastName || ''}`.trim()
-                                             : selectedPatient.email || `Patient ${selectedPatient.id || selectedPatient._id}`);
-                          
-                          setSelectedAppointment(prev => ({
-                            ...prev,
-                            patient: {
-                              ...selectedPatient,
-                              name: displayName
-                            },
-                            patientId: selectedPatient.id || selectedPatient._id
-                          }));
-                        }
-                      }}
-                      options={patients.map(patient => {
-                        const displayName = patient.name || 
-                                         patient.fullName ||
-                                         (patient.firstName || patient.lastName 
-                                           ? `${patient.firstName || ''} ${patient.lastName || ''}`.trim() 
-                                           : patient.email || `Patient ${patient.id || patient._id}`);
-                        
-                        return {
-                          value: patient.id || patient._id,
-                          label: displayName,
-                          title: patient.email || `ID: ${patient.id || patient._id}`
-                        };
-                      })}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-              )}
+              </div>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1144,47 +1242,30 @@ const AppointmentManagement = () => {
                   </div>
                   <div className="flex-1">
                     <Select
-                      value={selectedAppointment.doctorId || (selectedAppointment.doctor?.id || selectedAppointment.doctor?._id) || ''}
+                      value={selectedAppointment.doctorId || ''}
                       onChange={(e) => {
+                        const doctorId = e.target.value;
                         const selectedDoctor = doctors.find(d => 
-                          d.id?.toString() === e.target.value.toString() || 
-                          d._id?.toString() === e.target.value.toString()
+                          d.id === doctorId || d._id === doctorId
                         );
                         setSelectedAppointment(prev => ({
                           ...prev,
-                          doctorId: selectedDoctor?.id || selectedDoctor?._id || e.target.value,
-                          doctor: selectedDoctor ? {
-                            ...selectedDoctor,
-                            name: selectedDoctor.name || 
-                                  (selectedDoctor.firstName || selectedDoctor.lastName 
-                                    ? `${selectedDoctor.firstName || ''} ${selectedDoctor.lastName || ''}`.trim()
-                                    : 'Doctor')
-                          } : null
+                          doctorId,
+                          doctor: selectedDoctor || null
                         }));
                       }}
-                      options={doctors.map(doctor => {
-                        // Handle different possible name fields and ensure 'Dr.' prefix
-                        let name = doctor.fullName || 
-                                 `${doctor.firstName || ''} ${doctor.lastName || ''}`.trim() || 
-                                 doctor.name || 
-                                 doctor.email || 
-                                 `Doctor ${doctor.id}`;
-                        
-                        // Ensure 'Dr.' prefix is present
-                        if (!/^dr\.?\s+/i.test(name)) {
-                          name = name.startsWith('Dr.') || name.startsWith('Dr ') ? name : `Dr. ${name}`;
-                        }
-                        
-                        return {
+                      options={[
+                        { value: '', label: 'Select a doctor', disabled: true },
+                        ...doctors.map(doctor => ({
                           value: doctor.id || doctor._id,
-                          label: name,
-                          title: [
-                            doctor.specialization,
-                            doctor.email || `ID: ${doctor.id}`
-                          ].filter(Boolean).join(' - ')
-                        };
-                      })}
+                          label: doctor.name || doctor.fullName || 
+                                (doctor.firstName || doctor.lastName 
+                                  ? `${doctor.firstName || ''} ${doctor.lastName || ''}`.trim() 
+                                  : doctor.email || `Doctor ${doctor.id}`)
+                        }))
+                      ]}
                       className="w-full"
+                      required
                     />
                   </div>
                 </div>
@@ -1208,15 +1289,22 @@ const AppointmentManagement = () => {
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Time
+                  Time *
                 </label>
-                <Input
-                  type="time"
+                <Select
                   value={selectedAppointment.time || ''}
                   onChange={(e) => setSelectedAppointment(prev => ({
                     ...prev,
                     time: e.target.value
                   }))}
+                  options={[
+                    { value: '', label: 'Select a time', disabled: true },
+                    ...timeSlots.map(slot => ({
+                      value: slot.value,
+                      label: slot.label
+                    }))
+                  ]}
+                  required
                 />
               </div>
             </div>
@@ -1228,10 +1316,10 @@ const AppointmentManagement = () => {
                 </label>
                 <Select
                   value={selectedAppointment.status || 'SCHEDULED'}
-                  onChange={(e) => setSelectedAppointment({
-                    ...selectedAppointment,
+                  onChange={(e) => setSelectedAppointment(prev => ({
+                    ...prev,
                     status: e.target.value
-                  })}
+                  }))}
                   options={[
                     { value: 'SCHEDULED', label: 'Scheduled' },
                     { value: 'CONFIRMED', label: 'Confirmed' },
@@ -1248,10 +1336,10 @@ const AppointmentManagement = () => {
                 </label>
                 <Select
                   value={selectedAppointment.type || 'follow-up'}
-                  onChange={(e) => setSelectedAppointment({
-                    ...selectedAppointment,
+                  onChange={(e) => setSelectedAppointment(prev => ({
+                    ...prev,
                     type: e.target.value
-                  })}
+                  }))}
                   options={[
                     { value: 'general', label: 'General Health Checkup' },
                     { value: 'nutrition', label: 'Nutrition Consultation' },
@@ -1272,10 +1360,10 @@ const AppointmentManagement = () => {
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 rows={3}
                 value={selectedAppointment.notes || ''}
-                onChange={(e) => setSelectedAppointment({
-                  ...selectedAppointment,
+                onChange={(e) => setSelectedAppointment(prev => ({
+                  ...prev,
                   notes: e.target.value
-                })}
+                }))}
               />
             </div>
 
@@ -1290,51 +1378,9 @@ const AppointmentManagement = () => {
                 Cancel
               </Button>
               <Button
-                onClick={async () => {
-                  try {
-                    // Prepare the appointment data for update
-                    const appointmentData = {
-                      ...selectedAppointment,
-                      // Make sure we have the doctor ID
-                      doctorId: selectedAppointment.doctorId || selectedAppointment.doctor?.id,
-                      // Format the date and time into a single datetime
-                      date: selectedAppointment.date,
-                      time: selectedAppointment.time,
-                      // Include other fields that might be needed
-                      type: selectedAppointment.type || 'general',
-                      status: selectedAppointment.status || 'scheduled',
-                      notes: selectedAppointment.notes || ''
-                    };
-
-                    console.log('Saving appointment data:', appointmentData);
-                    
-                    if (isEditing) {
-                      await updateAppointment(selectedAppointment.id, appointmentData);
-                      toast.success('Appointment updated successfully');
-                    } else {
-                      // Create new appointment
-                      const newAppointment = {
-                        ...appointmentData,
-                        patientId: selectedAppointment.patientId || selectedAppointment.patient?.id,
-                        createdAt: new Date().toISOString()
-                      };
-                      
-                      // Remove the id so the server can generate one
-                      delete newAppointment.id;
-                      
-                      await createAppointment(newAppointment);
-                      toast.success('Appointment created successfully');
-                    }
-                    
-                    // Refresh the appointments list
-                    fetchAppointments();
-                    setShowAppointmentModal(false);
-                    setSelectedAppointment(null);
-                  } catch (error) {
-                    console.error('Error saving appointment:', error);
-                    toast.error(error.message || 'Failed to save appointment');
-                  }
-                }}
+                type="submit"
+                onClick={handleSubmit}
+                className="w-full sm:w-auto"
               >
                 {isEditing ? 'Update' : 'Create'} Appointment
               </Button>
