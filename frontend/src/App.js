@@ -26,12 +26,16 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
   // Show loading state while checking auth
   if (isLoading) {
-    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
   }
 
-  // If not authenticated, redirect to login
+  // If not authenticated, redirect to login with return URL
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // If trying to access a role-restricted route without permission
@@ -44,6 +48,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to={redirectPath} replace />;
   }
 
+  // If everything is fine, render the protected route with layout
   return <Layout>{children}</Layout>;
 };
 

@@ -77,8 +77,13 @@ public class AppointmentService {
     }
     
     public Appointment updateAppointment(Long id, Map<String, Object> updates) {
+        System.out.println("Starting update for appointment ID: " + id);
+        System.out.println("Received updates: " + updates);
+        
         Appointment appointment = appointmentRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Appointment not found with id: " + id));
+            
+        System.out.println("Current appointment status: " + appointment.getStatus());
             
         // Update doctor if provided
         if (updates.containsKey("doctorId")) {
@@ -86,29 +91,40 @@ public class AppointmentService {
             User doctor = userRepository.findById(doctorId)
                 .orElseThrow(() -> new RuntimeException("Doctor not found with id: " + doctorId));
             appointment.setDoctor(doctor);
+            System.out.println("Updated doctor to ID: " + doctorId);
         }
         
         // Update appointment date if provided
         if (updates.containsKey("appointmentDate")) {
             LocalDateTime appointmentDate = LocalDateTime.parse(updates.get("appointmentDate").toString());
             appointment.setAppointmentDate(appointmentDate);
+            System.out.println("Updated appointment date to: " + appointmentDate);
         }
         
         // Update type if provided
         if (updates.containsKey("type")) {
-            appointment.setType(updates.get("type").toString());
+            String newType = updates.get("type").toString();
+            appointment.setType(newType);
+            System.out.println("Updated type to: " + newType);
         }
         
         // Update notes if provided
         if (updates.containsKey("notes")) {
-            appointment.setNotes(updates.get("notes").toString());
+            String newNotes = updates.get("notes").toString();
+            appointment.setNotes(newNotes);
+            System.out.println("Updated notes");
         }
         
         // Update status if provided
         if (updates.containsKey("status")) {
-            appointment.setStatus(updates.get("status").toString());
+            String newStatus = updates.get("status").toString();
+            System.out.println("Updating status from " + appointment.getStatus() + " to " + newStatus);
+            appointment.setStatus(newStatus);
+            System.out.println("Status after update: " + appointment.getStatus());
         }
         
-        return appointmentRepository.save(appointment);
+        Appointment updatedAppointment = appointmentRepository.save(appointment);
+        System.out.println("Appointment saved successfully. New status: " + updatedAppointment.getStatus());
+        return updatedAppointment;
     }
 }

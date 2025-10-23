@@ -36,6 +36,9 @@ export const AppProvider = ({ children }) => {
   // Medical reports
   const [reports, setReports] = useState([]);
 
+  // Add loading state
+  const [isLoading, setIsLoading] = useState(true);
+
   // Check for existing session on mount
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -45,9 +48,11 @@ export const AppProvider = ({ children }) => {
         setUser(userData);
         setIsAuthenticated(true);
       } catch (error) {
+        console.error('Error parsing user data:', error);
         localStorage.removeItem('user');
       }
     }
+    setIsLoading(false);
   }, []);
 
   // Authentication functions
@@ -513,27 +518,16 @@ export const AppProvider = ({ children }) => {
   };
 
   const value = {
-    // Auth
     user,
     isAuthenticated,
+    isLoading,
     login,
     logout,
-    
-    // Health Data
+    notifications,
+    users,
+    auditLogs,
     healthData,
-    addHealthData,
-    updateHealthData,
-    deleteHealthData,
-    getHealthDataByUserId,
-    
-    // Diet Plans
     dietPlans,
-    addDietPlan,
-    updateDietPlan,
-    deleteDietPlan,
-    getDietPlansByUserId,
-    
-    // Appointments
     appointments,
     scheduleAppointment,
     updateAppointment,

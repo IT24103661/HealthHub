@@ -12,6 +12,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/appointments")
@@ -129,7 +130,41 @@ public class AppointmentController {
     public ResponseEntity<?> getDoctorAppointments(@PathVariable Long doctorId) {
         try {
             List<Appointment> appointments = appointmentService.getDoctorAppointments(doctorId);
-            return ResponseEntity.ok(appointments);
+            
+            // Convert to DTOs with patient details
+            List<Map<String, Object>> response = appointments.stream().map(appointment -> {
+                Map<String, Object> dto = new HashMap<>();
+                dto.put("id", appointment.getId());
+                dto.put("appointmentDate", appointment.getAppointmentDate());
+                dto.put("type", appointment.getType());
+                dto.put("status", appointment.getStatus());
+                dto.put("notes", appointment.getNotes());
+                dto.put("duration", 30); // Default duration
+                dto.put("location", "Main Clinic"); // Default location
+                
+                // Add patient details
+                if (appointment.getPatient() != null) {
+                    Map<String, Object> patient = new HashMap<>();
+                    patient.put("id", appointment.getPatient().getId());
+                    String[] nameParts = appointment.getPatient().getFullName().split(" ", 2);
+                    patient.put("firstName", nameParts[0]);
+                    patient.put("lastName", nameParts.length > 1 ? nameParts[1] : "");
+                    patient.put("email", appointment.getPatient().getEmail());
+                    dto.put("patient", patient);
+                }
+                
+                // Add doctor details
+                if (appointment.getDoctor() != null) {
+                    Map<String, Object> doctor = new HashMap<>();
+                    doctor.put("id", appointment.getDoctor().getId());
+                    doctor.put("name", appointment.getDoctor().getFullName());
+                    dto.put("doctor", doctor);
+                }
+                
+                return dto;
+            }).collect(Collectors.toList());
+            
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(500).body("Error fetching doctor appointments: " + e.getMessage());
         }

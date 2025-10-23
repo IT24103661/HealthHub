@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useApp } from '../../context/AppContext';
 import { 
   Search, 
-  Plus, 
   Filter, 
   Calendar, 
   Clock, 
@@ -12,64 +12,41 @@ import {
   ChevronLeft,
   ChevronRight,
   MoreVertical,
-  Edit,
-  Trash2,
-  CalendarDays,
-  UserCheck,
-  UserX,
+  Clock as Clock3,
+  Calendar as CalendarDays,
   Stethoscope,
-  Clock3,
   AlertCircle,
   CheckCircle2,
   X,
   ChevronDown,
   SlidersHorizontal,
+  Loader2,
+  Plus,
+  List,
+  User as UserCheck,
+  UserX,
   Download,
-  Printer,
-  Mail,
-  MessageSquare,
-  List
+  Eye
 } from 'lucide-react';
-import { format, parseISO, isToday, isPast, isFuture, isThisWeek, isThisMonth, addDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
-import { Bar, Doughnut } from 'react-chartjs-2';
+import AppointmentDetailModal from '../../components/AppointmentDetailModal';
+import { Doughnut } from 'react-chartjs-2';
 import 'chart.js/auto';
+import { format, parseISO, isToday, isPast, isFuture, isThisWeek, isThisMonth, addDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
-// Enhanced mock data with more realistic information
-const mockAppointments = Array.from({ length: 25 }, (_, i) => {
-  const types = ['Consultation', 'Follow-up', 'Check-up', 'Procedure', 'Vaccination', 'Therapy'];
-  const statuses = ['scheduled', 'completed', 'cancelled', 'no-show'];
-  const reasons = [
-    'Routine check-up',
-    'Medication review',
-    'Pain management',
-    'Test results',
-    'Post-operation follow-up',
-    'New patient visit',
-    'Annual physical',
-    'Vaccination',
-    'Therapy session'
-  ];
-  
-  const date = new Date();
-  date.setDate(date.getDate() + (i % 7) - 3); // Mix of past and future dates
-  
-  return {
-    id: `appt-${1000 + i}`,
-    patient: `Patient ${i + 1}`,
-    patientId: `pat-${1000 + i}`,
-    date: date.toISOString().split('T')[0],
-    time: `${9 + (i % 8)}:${i % 2 === 0 ? '00' : '30'} ${i < 8 ? 'AM' : 'PM'}`,
-    type: types[i % types.length],
-    status: statuses[i % statuses.length],
-    reason: reasons[i % reasons.length],
-    duration: [30, 45, 60][i % 3],
-    notes: i % 3 === 0 ? 'Patient has allergies to penicillin' : '',
-    doctor: 'Dr. Smith',
-    location: i % 2 === 0 ? 'Main Clinic' : 'Downtown Office',
-    insurance: i % 4 === 0 ? 'Medicare' : ['Blue Cross', 'Aetna', 'Cigna', 'United Health'][i % 4],
-    lastVisit: i % 5 === 0 ? null : new Date(Date.now() - (i * 2 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0]
-  };
-});
+// Base URL for API requests
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api';
+
+// Helper function to format time in 12-hour format
+const formatTime = (timeString) => {
+  const [hours, minutes] = timeString.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const formattedHour = hour % 12 || 12;
+  return `${formattedHour}:${minutes} ${ampm}`;
+};
 
 // Calculate appointment statistics
 const calculateStats = (appointments) => {
@@ -101,66 +78,158 @@ const calculateStats = (appointments) => {
 
 const Appointments = () => {
   const navigate = useNavigate();
+  const { user } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
-  const [locationFilter, setLocationFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [appointments, setAppointments] = useState([]);
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
-  const appointmentsPerPage = 8;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const appointmentsPerPage = 10;
+  
+  // Fetch appointments on component mount
+  useEffect(() => {
+    const fetchAppointments = async () => {
+      try {
+        if (!user || !user.id) {
+          setError('User not authenticated');
+          setLoading(false);
+          return;
+        }
+
+        setLoading(true);
+        const token = localStorage.getItem('token');
+        console.log('Fetching appointments for doctor ID:', user.id);
+        console.log('Using API URL:', `${API_URL}/appointments/doctor/${user.id}`);
+        
+        const response = await axios.get(`${API_URL}/appointments/doctor/${user.id}`, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          withCredentials: true
+        });
+        
+        console.log('API Response:', response);
+        
+        // Transform the data to match the expected format
+        const appointmentsData = response.data.appointments || response.data; // Handle both formats
+        const formattedAppointments = (Array.isArray(appointmentsData) ? appointmentsData : []).map(appt => {
+          // Log the raw appointment data for debugging
+          console.log('Raw appointment data:', appt);
+          
+          return {
+            // Preserve the original _id and make it available as both id and _id
+            id: appt._id || appt.id, // Use _id if available, fall back to id
+            _id: appt._id || appt.id, // Make sure _id is always set
+            patient: appt.patient 
+              ? `${appt.patient.firstName || ''} ${appt.patient.lastName || ''}`.trim() || 'Unknown Patient'
+              : 'Unknown Patient',
+            patientId: appt.patient?.id || appt.patientId,
+            patientPhone: appt.patient?.phoneNumber || appt.patientPhone || 'N/A',
+            patientEmail: appt.patient?.email || appt.patientEmail || 'N/A',
+            date: appt.appointmentDate ? appt.appointmentDate.split('T')[0] : new Date().toISOString().split('T')[0],
+            time: appt.appointmentDate ? formatTime(appt.appointmentDate.split('T')[1]) : '12:00 PM',
+            type: appt.type || 'Consultation',
+            status: appt.status?.toLowerCase() || 'scheduled',
+            reason: appt.reason || 'Regular check-up',
+            duration: appt.duration || 30,
+            notes: appt.notes || '',
+            doctor: appt.doctorId?.name || 'Dr. Unknown',
+            location: appt.location || 'Main Clinic',
+            // Preserve the original appointment object for debugging
+            rawData: appt
+          };
+        });
+        
+        setAppointments(formattedAppointments);
+      } catch (err) {
+        console.error('Error fetching appointments:', err);
+        console.error('Error details:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status,
+          headers: err.response?.headers
+        });
+        setError('Failed to load appointments. Please check the console for details.');
+        toast.error(`Failed to load appointments: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAppointments();
+  }, []);
   
   // Calculate statistics
-  const stats = useMemo(() => calculateStats(mockAppointments), []);
+  const stats = useMemo(() => calculateStats(appointments), [appointments]);
   
   // Get unique types and locations for filters
   const appointmentTypes = useMemo(() => {
-    const types = new Set(mockAppointments.map(a => a.type));
-    return Array.from(types).sort();
-  }, []);
+    const types = [...new Set(appointments.map(a => a.type))];
+    return types.sort();
+  }, [appointments]);
   
   const locations = useMemo(() => {
-    const locs = new Set(mockAppointments.map(a => a.location));
-    return Array.from(locs).sort();
-  }, []);
+    const locs = [...new Set(appointments.map(a => a.location))];
+    return locs.sort();
+  }, [appointments]);
 
+  const [locationFilter, setLocationFilter] = useState('all');
+  
   const filteredAppointments = useMemo(() => {
-    return mockAppointments.filter(appt => {
+    if (!appointments.length) return [];
+    
+    return appointments.filter(appt => {
+      if (!appt) return false;
+      
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = 
-        appt.patient.toLowerCase().includes(searchLower) ||
-        appt.type.toLowerCase().includes(searchLower) ||
-        appt.reason.toLowerCase().includes(searchLower) ||
-        appt.insurance?.toLowerCase().includes(searchLower);
+        (appt.patient?.toLowerCase().includes(searchLower) ||
+        appt.type?.toLowerCase().includes(searchLower) ||
+        appt.reason?.toLowerCase().includes(searchLower) ||
+        appt.notes?.toLowerCase().includes(searchLower)) ?? false;
       
       const matchesStatus = statusFilter === 'all' || appt.status === statusFilter;
       const matchesType = typeFilter === 'all' || appt.type === typeFilter;
-      const matchesLocation = locationFilter === 'all' || appt.location === locationFilter;
       
-      const apptDateTime = parseISO(`${appt.date}T${appt.time}`);
-      const now = new Date();
       let matchesDate = true;
-      
-      if (dateFilter === 'today') {
-        matchesDate = isToday(parseISO(appt.date));
-      } else if (dateFilter === 'week') {
-        matchesDate = isThisWeek(parseISO(appt.date)) && isFuture(apptDateTime);
-      } else if (dateFilter === 'month') {
-        matchesDate = isThisMonth(parseISO(appt.date));
-      } else if (dateFilter === 'past') {
-        matchesDate = isPast(apptDateTime) && !isToday(parseISO(appt.date));
-      } else if (dateFilter === 'upcoming') {
-        matchesDate = isFuture(apptDateTime) || isToday(parseISO(appt.date));
+      try {
+        const apptDate = parseISO(appt.date);
+        const now = new Date();
+        
+        if (dateFilter === 'today') {
+          matchesDate = isToday(apptDate);
+        } else if (dateFilter === 'week') {
+          matchesDate = isThisWeek(apptDate) && isFuture(apptDate);
+        } else if (dateFilter === 'month') {
+          matchesDate = isThisMonth(apptDate);
+        } else if (dateFilter === 'past') {
+          matchesDate = isPast(apptDate) && !isToday(apptDate);
+        } else if (dateFilter === 'upcoming') {
+          matchesDate = isFuture(apptDate) || isToday(apptDate);
+        }
+      } catch (e) {
+        console.error('Error processing date filter:', e);
+        matchesDate = false;
       }
       
-      return matchesSearch && matchesStatus && matchesDate && matchesType && matchesLocation;
+      return matchesSearch && matchesStatus && matchesDate && matchesType;
     }).sort((a, b) => {
-      // Sort by date and time
-      const dateA = parseISO(`${a.date}T${a.time}`);
-      const dateB = parseISO(`${b.date}T${b.time}`);
-      return dateA - dateB;
+      try {
+        const dateA = parseISO(a.date);
+        const dateB = parseISO(b.date);
+        return dateA - dateB;
+      } catch (e) {
+        return 0;
+      }
     });
-  }, [searchTerm, statusFilter, dateFilter, typeFilter, locationFilter]);
+  }, [appointments, searchTerm, statusFilter, dateFilter, typeFilter]);
   
   // Calculate total pages
   const totalPages = Math.ceil(filteredAppointments.length / appointmentsPerPage);
@@ -177,13 +246,29 @@ const Appointments = () => {
   };
   
   // Handle status update
-  const handleStatusUpdate = (appointmentId, newStatus) => {
-    // In a real app, this would be an API call
-    console.log(`Updating appointment ${appointmentId} to ${newStatus}`);
-    // Update UI optimistically
-    // setAppointments(prev => prev.map(a => 
-    //   a.id === appointmentId ? { ...a, status: newStatus } : a
-    // ));
+  const handleStatusUpdate = async (appointmentId, newStatus) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.patch(
+        `${API_URL}/appointments/${appointmentId}/status`,
+        { status: newStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      // Update UI optimistically
+      setAppointments(prev => 
+        prev.map(appt => 
+          appt.id === appointmentId 
+            ? { ...appt, status: newStatus.toLowerCase() } 
+            : appt
+        )
+      );
+      
+      toast.success(`Appointment marked as ${newStatus}`);
+    } catch (err) {
+      console.error('Error updating appointment status:', err);
+      toast.error('Failed to update appointment status');
+    }
   };
   
   // Chart data for appointment statistics
@@ -247,10 +332,41 @@ const Appointments = () => {
   };
   
   // Get paginated appointments
-  const paginatedAppointments = useMemo(() => {
-    const startIndex = (currentPage - 1) * appointmentsPerPage;
-    return filteredAppointments.slice(startIndex, startIndex + appointmentsPerPage);
-  }, [filteredAppointments, currentPage]);
+  const indexOfLastAppointment = currentPage * appointmentsPerPage;
+  const indexOfFirstAppointment = indexOfLastAppointment - appointmentsPerPage;
+  const paginatedAppointments = filteredAppointments.slice(indexOfFirstAppointment, indexOfLastAppointment);
+
+  // Handle view appointment details
+  const handleViewAppointment = (appointment) => {
+    console.log('Original appointment object:', appointment);
+    
+    // Create a new object with all the properties
+    const appointmentWithId = {
+      ...appointment,
+      // Make sure we have both id and _id available
+      id: appointment.id || appointment._id,
+      _id: appointment._id || appointment.id
+    };
+    
+    console.log('Appointment with normalized ID:', appointmentWithId);
+    
+    // Log all available IDs for debugging
+    console.log('Available IDs:', {
+      id: appointmentWithId.id,
+      _id: appointmentWithId._id,
+      rawDataId: appointmentWithId.rawData?._id,
+      rawDataAppointmentId: appointmentWithId.rawData?.appointmentId
+    });
+    
+    if (!appointmentWithId.id && !appointmentWithId._id) {
+      console.error('No valid ID found in appointment:', appointment);
+      toast.error('Error: Could not identify appointment');
+      return;
+    }
+    
+    setSelectedAppointment(appointmentWithId);
+    setIsModalOpen(true);
+  };
 
   const getStatusBadge = (status) => {
     const statusClasses = {
@@ -274,19 +390,158 @@ const Appointments = () => {
     );
   };
 
-  const handleViewAppointment = (id) => {
-    navigate(`/doctor/appointments/${id}`);
-  };
-
   const handleEditAppointment = (e, id) => {
     e.stopPropagation();
     navigate(`/doctor/appointments/${id}/edit`);
   };
 
-  const handleDeleteAppointment = (e, id) => {
-    e.stopPropagation();
-    // Implement delete logic
-    console.log('Delete appointment', id);
+  const updateAppointmentStatus = async (appointmentId, newStatus) => {
+    if (!appointmentId) {
+      console.error('No appointment ID provided for status update');
+      toast.error('Error: Missing appointment ID');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      console.log('Updating appointment status:', { appointmentId, newStatus });
+      
+      // Get the current appointment
+      const currentAppointment = appointments.find(a => a.id == appointmentId || a._id == appointmentId);
+      if (!currentAppointment) {
+        throw new Error('Appointment not found in local state');
+      }
+      
+      // Prepare the update data as a simple object with only the status field
+      // The backend expects a Map<String, Object> with the fields to update
+      const updateData = {
+        status: newStatus
+      };
+      
+      console.log('Sending update request:', {
+        url: `${API_URL}/appointments/${appointmentId}`,
+        data: updateData
+      });
+      
+      const response = await axios.put(
+        `${API_URL}/appointments/${appointmentId}`,
+        updateData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          withCredentials: true
+        }
+      );
+
+      console.log('Update response:', response.data);
+      
+      if (response.data && response.data.success) {
+        // Update the local state to reflect the change
+        setAppointments(prevAppointments =>
+          prevAppointments.map(appt =>
+            (appt.id == appointmentId || appt._id == appointmentId) 
+              ? { 
+                  ...appt, 
+                  status: newStatus,
+                  rawData: {
+                    ...appt.rawData,
+                    status: newStatus
+                  }
+                } 
+              : appt
+          )
+        );
+        
+        // Close the modal if open
+        setIsModalOpen(false);
+        
+        toast.success(response.data.message || `Appointment marked as ${newStatus} successfully`);
+      }
+    } catch (error) {
+      console.error('Error updating appointment status:', error);
+      toast.error(`Failed to update appointment: ${error.response?.data?.message || error.message}`);
+    }
+  };
+
+  const handleAccept = (appointmentId) => {
+    // Get the most reliable ID from available sources
+    const id = appointmentId || 
+              (selectedAppointment && (selectedAppointment.id || selectedAppointment._id)) ||
+              (selectedAppointment?.rawData?._id) ||
+              (selectedAppointment?.rawData?.id);
+    
+    console.log('Accept - ID resolution:', {
+      appointmentId,
+      selectedAppointmentId: selectedAppointment?.id,
+      selectedAppointment_id: selectedAppointment?._id,
+      rawDataId: selectedAppointment?.rawData?._id,
+      resolvedId: id
+    });
+    
+    if (!id) {
+      console.error('No appointment ID found for accept action');
+      console.log('Selected appointment:', selectedAppointment);
+      toast.error('Error: Could not identify appointment to accept');
+      return;
+    }
+    
+    console.log('Accepting appointment with ID:', id);
+    updateAppointmentStatus(id, 'accepted');
+  };
+
+  const handleReschedule = (appointmentId) => {
+    // Get the most reliable ID from available sources
+    const id = appointmentId || 
+              (selectedAppointment && (selectedAppointment.id || selectedAppointment._id)) ||
+              (selectedAppointment?.rawData?._id) ||
+              (selectedAppointment?.rawData?.id);
+    
+    console.log('Reschedule - ID resolution:', {
+      appointmentId,
+      selectedAppointmentId: selectedAppointment?.id,
+      selectedAppointment_id: selectedAppointment?._id,
+      rawDataId: selectedAppointment?.rawData?._id,
+      resolvedId: id
+    });
+    
+    if (!id) {
+      console.error('No appointment ID found for reschedule action');
+      console.log('Selected appointment:', selectedAppointment);
+      toast.error('Error: Could not identify appointment to reschedule');
+      return;
+    }
+    
+    console.log('Rescheduling appointment with ID:', id);
+    // This would typically open a reschedule form/modal
+    toast.info('Reschedule functionality would open here');
+  };
+
+  const handleCancel = (appointmentId) => {
+    // Get the most reliable ID from available sources
+    const id = appointmentId || 
+              (selectedAppointment && (selectedAppointment.id || selectedAppointment._id)) ||
+              (selectedAppointment?.rawData?._id) ||
+              (selectedAppointment?.rawData?.id);
+    
+    console.log('Cancel - ID resolution:', {
+      appointmentId,
+      selectedAppointmentId: selectedAppointment?.id,
+      selectedAppointment_id: selectedAppointment?._id,
+      rawDataId: selectedAppointment?.rawData?._id,
+      resolvedId: id
+    });
+    
+    if (!id) {
+      console.error('No appointment ID found for cancel action');
+      console.log('Selected appointment:', selectedAppointment);
+      toast.error('Error: Could not identify appointment to cancel');
+      return;
+    }
+    
+    console.log('Canceling appointment with ID:', id);
+    updateAppointmentStatus(id, 'cancelled');
   };
 
   return (
@@ -297,6 +552,64 @@ const Appointments = () => {
           <p className="mt-1 text-sm text-gray-500">
             Manage and schedule patient appointments
           </p>
+        </div>
+
+        {/* Status Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+            <div className="flex items-center">
+              <div className="p-3 rounded-full bg-blue-100 text-blue-600">
+                <CalendarDays className="h-6 w-6" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Today's Appointments</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {appointments.filter(a => isToday(parseISO(a.date))).length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+            <div className="flex items-center">
+              <div className="p-3 rounded-full bg-green-100 text-green-600">
+                <CheckCircle className="h-6 w-6" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Accept</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {appointments.filter(a => a.status === 'accepted').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
+            <div className="flex items-center">
+              <div className="p-3 rounded-full bg-yellow-100 text-yellow-600">
+                <Clock className="h-6 w-6" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Pending</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {appointments.filter(a => a.status === 'scheduled' || a.status === 'pending').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white p-4 rounded-lg shadow border-l-4 border-red-500">
+            <div className="flex items-center">
+              <div className="p-3 rounded-full bg-red-100 text-red-600">
+                <XCircle className="h-6 w-6" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Cancelled</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {appointments.filter(a => a.status === 'cancelled').length}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Filters and Search */}
@@ -366,92 +679,10 @@ const Appointments = () => {
                   </option>
                 ))}
               </select>
-              
-              <Link
-                to="/doctor/appointments/new"
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                New Appointment
-              </Link>
             </div>
           </div>
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-blue-500 rounded-md p-3">
-                  <CalendarDays className="h-6 w-6 text-white" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Today's Appointments</dt>
-                    <dd className="flex items-baseline">
-                      <div className="text-2xl font-semibold text-gray-900">{stats.today}</div>
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-green-500 rounded-md p-3">
-                  <UserCheck className="h-6 w-6 text-white" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Completed</dt>
-                    <dd className="flex items-baseline">
-                      <div className="text-2xl font-semibold text-gray-900">{stats.completed}</div>
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-yellow-500 rounded-md p-3">
-                  <Clock3 className="h-6 w-6 text-white" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Upcoming</dt>
-                    <dd className="flex items-baseline">
-                      <div className="text-2xl font-semibold text-gray-900">{stats.upcoming}</div>
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-red-500 rounded-md p-3">
-                  <UserX className="h-6 w-6 text-white" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">No Shows</dt>
-                    <dd className="flex items-baseline">
-                      <div className="text-2xl font-semibold text-gray-900">{stats.noShow}</div>
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Appointments List */}
@@ -550,13 +781,11 @@ const Appointments = () => {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <button
-                                onClick={() => handleViewDetails(appointment)}
-                                className="text-blue-600 hover:text-blue-900 mr-3"
+                                onClick={() => handleViewAppointment(appointment)}
+                                className="text-blue-600 hover:text-blue-900 flex items-center"
                               >
+                                <Eye className="h-4 w-4 mr-1" />
                                 View
-                              </button>
-                              <button className="text-gray-600 hover:text-gray-900">
-                                <MoreVertical className="h-5 w-5" />
                               </button>
                             </td>
                           </tr>
@@ -745,14 +974,7 @@ const Appointments = () => {
             <div className="bg-white shadow rounded-lg p-4">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
               <div className="space-y-3">
-                <Link
-                  to="/doctor/appointments/new"
-                  className="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  New Appointment
-                </Link>
-                <button
+<button
                   type="button"
                   onClick={() => setViewMode('calendar')}
                   className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -773,7 +995,7 @@ const Appointments = () => {
             {/* Today's Schedule */}
             <div className="bg-white shadow rounded-lg p-4">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Today's Schedule</h3>
-              {mockAppointments
+              {appointments
                 .filter(appt => isToday(parseISO(appt.date)))
                 .slice(0, 3)
                 .map((appt) => (
@@ -787,13 +1009,26 @@ const Appointments = () => {
                     </div>
                   </div>
                 ))}
-              {mockAppointments.filter(appt => isToday(parseISO(appt.date))).length === 0 && (
+              {appointments.filter(appt => isToday(parseISO(appt.date))).length === 0 && (
                 <p className="text-sm text-gray-500 text-center py-2">No appointments scheduled for today.</p>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Appointment Detail Modal */}
+      <AppointmentDetailModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedAppointment(null);
+        }}
+        appointment={selectedAppointment}
+        onAccept={handleAccept}
+        onReschedule={handleReschedule}
+        onCancel={handleCancel}
+      />
     </div>
   );
 };

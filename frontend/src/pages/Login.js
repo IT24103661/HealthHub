@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import Card from '../components/Card';
 import Input from '../components/Input';
@@ -12,12 +12,14 @@ import { toast } from 'react-toastify';
 const Login = () => {
   const { login } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     role: 'user',
   });
   const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -25,35 +27,46 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMessage(''); // Clear previous errors
+    setErrorMessage('');
+    setIsLoading(true);
     
     try {
       const userData = await login(formData.email, formData.password, formData.role);
       toast.success('Login successful!');
       
-      // Redirect based on role
-      switch (userData.role) {
-        case 'admin':
-          navigate('/admin/users');
-          break;
-        case 'doctor':
-          navigate('/doctor/dashboard');
-          break;
-        case 'dietitian':
-          navigate('/dietitian/diet-plans');
-          break;
-        case 'receptionist':
-          navigate('/receptionist/dashboard');
-          break;
-        case 'user':
-        default:
-          navigate('/dashboard');
-          break;
+      // Check for return URL in location state
+      const from = location.state?.from?.pathname || '/';
+      
+      // Only redirect to default dashboard if no specific return URL
+      if (from === '/') {
+        // Redirect based on role
+        switch (userData.role) {
+          case 'admin':
+            navigate('/admin/dashboard');
+            break;
+          case 'doctor':
+            navigate('/doctor/dashboard');
+            break;
+          case 'dietitian':
+            navigate('/dietitian/dashboard');
+            break;
+          case 'receptionist':
+            navigate('/receptionist/dashboard');
+            break;
+          case 'user':
+          default:
+            navigate('/dashboard');
+            break;
+        }
+      } else {
+        // Redirect to the original requested URL
+        navigate(from, { replace: true });
       }
     } catch (error) {
       const message = error.message || 'Login failed. Please check your credentials.';
       setErrorMessage(message);
       toast.error(message);
+      setIsLoading(false);
     }
   };
 
@@ -126,8 +139,12 @@ const Login = () => {
               required
             />
 
-            <Button type="submit" variant="primary" size="lg" className="w-full mt-6">
-              Sign In
+            <Button 
+              type="submit" 
+              className="w-full" 
+              disabled={!formData.email || !formData.password || isLoading}
+            >
+              {isLoading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
 
