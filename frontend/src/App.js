@@ -21,27 +21,20 @@ import DoctorPrescriptions from './pages/doctor/Prescriptions';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
-  const { isAuthenticated, user } = useApp();
+  const { isAuthenticated, user, isLoading } = useApp();
   const location = useLocation();
 
+  // Show loading state while checking auth
+  if (isLoading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  }
+
+  // If not authenticated, redirect to login
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
 
-  // Redirect based on user role
-  if (location.pathname === '/dashboard') {
-    if (user?.role === 'admin') {
-      return <Navigate to="/admin/dashboard" replace />;
-    } else if (user?.role === 'receptionist') {
-      return <Navigate to="/receptionist/dashboard" replace />;
-    } else if (user?.role === 'dietitian') {
-      return <Navigate to="/dietitian/dashboard" replace />;
-    } else if (user?.role === 'doctor') {
-      return <Navigate to="/doctor/dashboard" replace />;
-    }
-  }
-
-  // Check if user has required role
+  // If trying to access a role-restricted route without permission
   if (allowedRoles && !allowedRoles.includes(user?.role)) {
     // Redirect to appropriate dashboard based on role
     const redirectPath = user?.role === 'admin' ? '/admin/dashboard' : 
