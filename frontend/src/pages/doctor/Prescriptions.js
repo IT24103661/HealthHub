@@ -16,56 +16,86 @@ import {
   Download,
   Share2,
   CheckCircle,
-  XCircle
+  XCircle,
+  Loader2
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { format, parseISO, isToday, isAfter, isBefore } from 'date-fns';
 
-// Mock data - replace with real API calls
-const mockPrescriptions = Array.from({ length: 15 }, (_, i) => ({
-  id: `rx-${i + 1}`,
-  patientId: `pat-${i + 1}`,
-  patientName: `Patient ${i + 1}`,
-  date: `2025-${String(10 - Math.floor(i / 5)).padStart(2, '0')}-${String(15 + (i % 10)).padStart(2, '0')}`,
-  medications: [
-    { 
-      name: ['Amoxicillin', 'Ibuprofen', 'Lisinopril', 'Metformin', 'Atorvastatin'][i % 5],
-      dosage: ['500mg', '200mg', '10mg', '1000mg', '20mg'][i % 5],
-      frequency: ['Once daily', 'Twice daily', 'Three times daily', 'As needed', 'At bedtime'][i % 5],
-      duration: ['7 days', '30 days', '14 days', '90 days', 'Until finished'][i % 5],
-      instructions: ['Take with food', 'Take on empty stomach', 'May cause drowsiness', 'Avoid alcohol', ''][i % 5]
-    },
-    ...(i % 3 === 0 ? [
-      {
-        name: ['Acetaminophen', 'Omeprazole', 'Albuterol', 'Sertraline', 'Metoprolol'][(i + 2) % 5],
-        dosage: ['325mg', '20mg', '90mcg', '50mg', '25mg'][(i + 2) % 5],
-        frequency: ['As needed', 'Once daily', 'Every 4-6 hours', 'Twice daily', 'Once daily'][(i + 2) % 5],
-        duration: ['30 days', '90 days', '14 days', '30 days', '30 days'][(i + 2) % 5],
-        instructions: ['Take for pain', 'Take before breakfast', 'Use with inhaler', 'Take in the morning', 'Take with food'][(i + 2) % 5]
-      }
-    ] : [])
-  ],
-  status: ['active', 'expired', 'completed', 'cancelled'][i % 4],
-  refills: i % 3,
-  notes: i % 4 === 0 ? 'Patient has allergy to penicillin' : '',
-  doctorName: 'Dr. Smith',
-  doctorSpecialty: 'Cardiology',
-  licenseNumber: 'MD-123456',
-  signature: 'Dr. Smith',
-  practiceName: 'City Medical Center',
-  practiceAddress: '123 Healthcare Blvd, City, State 12345',
-  practicePhone: '(555) 123-4567',
-  practiceEmail: 'info@citymedical.com'
-}));
+// API base URL
+const API_URL = 'http://localhost:8080/api';
 
-const Prescriptions = ({ isNew = false }) => {
+// Helper function to format prescription status
+const getPrescriptionStatus = (validUntil) => {
+  if (!validUntil) return 'active';
+  const today = new Date();
+  const validDate = new Date(validUntil);
+  return isAfter(validDate, today) ? 'active' : 'expired';
+};
+
+const Prescriptions = () => {
+  // State hooks must be called at the top level
   const navigate = useNavigate();
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const prescriptionsPerPage = 8;
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  const filteredPrescriptions = mockPrescriptions.filter(prescription => {
+  // Fetch prescriptions from API
+  useEffect(() => {
+    const fetchPrescriptions = async () => {
+      try {
+        const response = await fetch(`${API_URL}/prescriptions`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch prescriptions');
+        }
+        const data = await response.json();
+        
+        // Format prescriptions data
+        const formattedPrescriptions = data.map(prescription => ({
+          ...prescription,
+          status: getPrescriptionStatus(prescription.validUntil),
+          date: format(new Date(prescription.prescriptionDate), 'yyyy-MM-dd'),
+          // The backend already provides patientName directly
+          patientName: prescription.patientName || 'Unknown Patient'
+        }));
+        
+        setPrescriptions(formattedPrescriptions);
+      } catch (err) {
+        console.error('Error fetching prescriptions:', err);
+        setError('Failed to load prescriptions. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPrescriptions();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert">
+        <p className="font-bold">Error</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
+  const filteredPrescriptions = prescriptions.filter(prescription => {
     const matchesSearch = prescription.patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          prescription.medications.some(med => 
                            med.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -124,15 +154,171 @@ const Prescriptions = ({ isNew = false }) => {
   const handleViewPrescription = (id) => {
     navigate(`/doctor/prescriptions/view/${id}`);
   };
-  
-  const handleNewPrescription = () => {
-    navigate('/doctor/prescriptions/new');
-  };
 
+  const generatePrescriptionPdf = (prescription, action = 'print') => {
+    setIsGeneratingPdf(true);
+    
+    // Create a new PDF document
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    // Add header with logo and clinic info
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(37, 99, 235); // Blue color
+    doc.text('HealthHub Medical Center', pageWidth / 2, 25, { align: 'center' });
+    
+    // Add address and contact info
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    doc.text('123 Medical Drive, City, Country • Phone: (123) 456-7890 • Email: info@healthhub.com', 
+      pageWidth / 2, 32, { align: 'center' });
+    
+    // Add title
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PRESCRIPTION', pageWidth / 2, 50, { align: 'center' });
+    
+    // Add date and prescription ID
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Date: ${new Date(prescription.prescriptionDate).toLocaleDateString()}`, 20, 65);
+    doc.text(`Prescription #: ${prescription.id}`, pageWidth - 20, 65, { align: 'right' });
+    
+    // Add doctor and patient info
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Doctor:', 20, 85);
+    doc.text('Patient:', pageWidth / 2 + 10, 85);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.text(prescription.doctorName, 40, 85);
+    doc.text(prescription.patientName, pageWidth / 2 + 30, 85);
+    
+    // Add diagnosis
+    if (prescription.diagnosis) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Diagnosis:', 20, 100);
+      doc.setFont('helvetica', 'normal');
+      doc.text(prescription.diagnosis, 45, 100);
+    }
+    
+    // Add medications section
+    if (prescription.medications && prescription.medications.length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Medications:', 20, 120);
+      doc.setFont('helvetica', 'normal');
+      
+      let yPos = 130;
+      prescription.medications.forEach((med, index) => {
+        // Add medication details
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${index + 1}. ${med.name}`, 25, yPos);
+        doc.setFont('helvetica', 'normal');
+        
+        // Add dosage if available
+        if (med.dosage) {
+          doc.text(`   Dosage: ${med.dosage}`, 30, yPos + 7);
+          yPos += 7;
+        }
+        
+        // Add frequency if available
+        if (med.frequency) {
+          doc.text(`   Frequency: ${med.frequency}`, 30, yPos + 7);
+          yPos += 7;
+        }
+        
+        // Add instructions if available
+        if (med.instructions) {
+          const instructions = doc.splitTextToSize(`   Instructions: ${med.instructions}`, pageWidth - 50);
+          doc.text(instructions, 30, yPos + 7);
+          yPos += instructions.length * 7; // Approximate line height
+        }
+        
+        yPos += 10; // Space between medications
+        
+        // Add a new page if we're near the bottom
+        if (yPos > pageHeight - 30) {
+          doc.addPage();
+          yPos = 20;
+        }
+      });
+    }
+    
+    // Add notes if available
+    let notesYPos = 130; // Default Y position for notes if no medications
+    
+    // If we have medications, position notes after them
+    if (prescription.medications && prescription.medications.length > 0) {
+      // Position notes after the last medication
+      notesYPos = 130 + (prescription.medications.length * 30); // Approximate height per medication
+    }
+    
+    if (prescription.notes) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Notes:', 20, notesYPos);
+      doc.setFont('helvetica', 'normal');
+      const splitNotes = doc.splitTextToSize(prescription.notes, pageWidth - 40);
+      doc.text(splitNotes, 25, notesYPos + 10);
+      
+      // Update notesYPos for footer calculation
+      notesYPos += 20 + (splitNotes.length * 7);
+    }
+    
+    // Add footer
+    let footerY = pageHeight - 20;
+    
+    // Use notesYPos or current position for footer placement
+    const currentY = notesYPos || (doc.lastTextPos ? doc.lastTextPos().y : pageHeight - 40);
+    if (currentY > footerY - 10) {
+      doc.addPage();
+      footerY = 20;
+    } else {
+      footerY = currentY + 20;
+    }
+    
+    doc.setFontSize(8);
+    doc.text('This is a computer-generated prescription. No signature required.', 
+      pageWidth / 2, footerY, { align: 'center' });
+    
+    // Add validity if available
+    if (prescription.validUntil) {
+      doc.text(`Valid until: ${new Date(prescription.validUntil).toLocaleDateString()}`, 
+        pageWidth / 2, footerY + 5, { align: 'center' });
+    }
+    
+    // Save or print the PDF
+    if (action === 'download') {
+      doc.save(`prescription-${prescription.id}.pdf`);
+    } else {
+      // For printing, we need to create a blob and open it in a new window
+      const pdfBlob = doc.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl);
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+    }
+    
+    setIsGeneratingPdf(false);
+  };
+  
   const handlePrintPrescription = (e, id) => {
     e.stopPropagation();
-    console.log('Print prescription', id);
-    // Implement print functionality
+    const prescription = prescriptions.find(p => p.id === id);
+    if (prescription) {
+      generatePrescriptionPdf(prescription, 'print');
+    }
+  };
+  
+  const handleDownloadPdf = (e, id) => {
+    e.stopPropagation();
+    const prescription = prescriptions.find(p => p.id === id);
+    if (prescription) {
+      generatePrescriptionPdf(prescription, 'download');
+    }
   };
 
   const handleDownloadPrescription = (e, id) => {
@@ -143,233 +329,58 @@ const Prescriptions = ({ isNew = false }) => {
 
   const handleSharePrescription = (e, id) => {
     e.stopPropagation();
-    console.log('Share prescription', id);
-    // Implement share functionality
-  };
+    const prescription = prescriptions.find(p => p.id === id);
+    if (!prescription) return;
 
-  // New prescription form state
-  const [newPrescription, setNewPrescription] = useState({
-    patientId: '',
-    patientName: '',
-    medications: [{
-      name: '',
-      dosage: '',
-      frequency: '',
-      duration: '',
-      instructions: ''
-    }],
-    notes: ''
-  });
-
-  const handleAddMedication = () => {
-    setNewPrescription(prev => ({
-      ...prev,
-      medications: [
-        ...prev.medications,
-        { name: '', dosage: '', frequency: '', duration: '', instructions: '' }
-      ]
-    }));
-  };
-
-  const handleMedicationChange = (index, field, value) => {
-    const updatedMedications = [...newPrescription.medications];
-    updatedMedications[index] = {
-      ...updatedMedications[index],
-      [field]: value
-    };
-    setNewPrescription({
-      ...newPrescription,
-      medications: updatedMedications
-    });
-  };
-
-  const handleRemoveMedication = (index) => {
-    if (newPrescription.medications.length > 1) {
-      const updatedMedications = [...newPrescription.medications];
-      updatedMedications.splice(index, 1);
-      setNewPrescription({
-        ...newPrescription,
-        medications: updatedMedications
+    // Create share text
+    let shareText = `Prescription for ${prescription.patientName}\n`;
+    shareText += `Date: ${new Date(prescription.prescriptionDate).toLocaleDateString()}\n`;
+    shareText += `Doctor: ${prescription.doctorName}\n\n`;
+    
+    shareText += 'Medications:\n';
+    if (prescription.medications && prescription.medications.length > 0) {
+      prescription.medications.forEach(med => {
+        shareText += `- ${med.name}`;
+        if (med.dosage) shareText += ` (${med.dosage})`;
+        if (med.frequency) shareText += `, ${med.frequency}`;
+        shareText += '\n';
       });
+    } else {
+      shareText += 'No medications\n';
     }
+    
+    if (prescription.notes) {
+      shareText += `\nNotes: ${prescription.notes}\n\n`;
+    }
+    
+    shareText += 'Generated by HealthHub - Your trusted healthcare partner';
+
+    // Simple copy to clipboard with fallback
+    const textArea = document.createElement('textarea');
+    textArea.value = shareText;
+    document.body.appendChild(textArea);
+    textArea.select();
+    
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        alert('Prescription details copied to clipboard!');
+      } else {
+        // Fallback if execCommand doesn't work
+        window.prompt('Copy to clipboard: Ctrl+C, Enter', shareText);
+      }
+    } catch (err) {
+      // Final fallback
+      window.prompt('Copy to clipboard: Ctrl+C, Enter', shareText);
+    }
+    
+    document.body.removeChild(textArea);
   };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    // TODO: Implement API call to save the new prescription
-    console.log('New prescription:', newPrescription);
-    // After successful save, redirect to prescriptions list
-    navigate('/doctor/prescriptions');
+  
+  // Handle new prescription button click
+  const handleNewPrescription = () => {
+    navigate('/doctor/prescriptions/new');
   };
-
-  if (isNew) {
-    return (
-      <div className="min-h-screen bg-gray-50 py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="md:flex md:items-center md:justify-between mb-6">
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-gray-900">New Prescription</h1>
-              <p className="mt-1 text-sm text-gray-500">Create a new prescription for a patient</p>
-            </div>
-            <div className="mt-4 flex md:mt-0 md:ml-4">
-              <button
-                type="button"
-                onClick={() => navigate('/doctor/prescriptions')}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <ChevronLeft className="-ml-1 mr-2 h-5 w-5" />
-                Back to Prescriptions
-              </button>
-              <button
-                type="submit"
-                form="new-prescription-form"
-                className="ml-3 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <Plus className="-ml-1 mr-2 h-5 w-5" />
-                Save Prescription
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <form id="new-prescription-form" onSubmit={handleSubmit} className="p-6 space-y-8">
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="patientId" className="block text-sm font-medium text-gray-700">
-                    Patient ID
-                  </label>
-                  <input
-                    type="text"
-                    id="patientId"
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                    value={newPrescription.patientId}
-                    onChange={(e) => setNewPrescription({...newPrescription, patientId: e.target.value})}
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="patientName" className="block text-sm font-medium text-gray-700">
-                    Patient Name
-                  </label>
-                  <input
-                    type="text"
-                    id="patientName"
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                    value={newPrescription.patientName}
-                    onChange={(e) => setNewPrescription({...newPrescription, patientName: e.target.value})}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <h3 className="text-lg font-medium text-gray-900">Medications</h3>
-                  <button
-                    type="button"
-                    onClick={handleAddMedication}
-                    className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    <Plus className="-ml-0.5 mr-2 h-4 w-4" />
-                    Add Medication
-                  </button>
-                </div>
-
-                {newPrescription.medications.map((med, index) => (
-                  <div key={index} className="bg-gray-50 p-4 rounded-lg mb-4 relative">
-                    {newPrescription.medications.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMedication(index)}
-                        className="absolute top-2 right-2 text-gray-400 hover:text-red-500"
-                        title="Remove medication"
-                      >
-                        <XCircle className="h-5 w-5" />
-                      </button>
-                    )}
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Medication</label>
-                        <input
-                          type="text"
-                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                          value={med.name}
-                          onChange={(e) => handleMedicationChange(index, 'name', e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Dosage</label>
-                        <input
-                          type="text"
-                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                          value={med.dosage}
-                          onChange={(e) => handleMedicationChange(index, 'dosage', e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Frequency</label>
-                        <select
-                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                          value={med.frequency}
-                          onChange={(e) => handleMedicationChange(index, 'frequency', e.target.value)}
-                          required
-                        >
-                          <option value="">Select frequency</option>
-                          <option value="Once daily">Once daily</option>
-                          <option value="Twice daily">Twice daily</option>
-                          <option value="Three times daily">Three times daily</option>
-                          <option value="Four times daily">Four times daily</option>
-                          <option value="Every 4-6 hours">Every 4-6 hours</option>
-                          <option value="As needed">As needed</option>
-                          <option value="At bedtime">At bedtime</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Duration</label>
-                        <input
-                          type="text"
-                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                          placeholder="e.g., 7 days, 1 month"
-                          value={med.duration}
-                          onChange={(e) => handleMedicationChange(index, 'duration', e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Instructions</label>
-                        <input
-                          type="text"
-                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                          placeholder="e.g., Take with food"
-                          value={med.instructions}
-                          onChange={(e) => handleMedicationChange(index, 'instructions', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div>
-                <label htmlFor="notes" className="block text-sm font-medium text-gray-700">
-                  Notes (Optional)
-                </label>
-                <textarea
-                  id="notes"
-                  rows={3}
-                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  value={newPrescription.notes}
-                  onChange={(e) => setNewPrescription({...newPrescription, notes: e.target.value})}
-                />
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -476,12 +487,16 @@ const Prescriptions = ({ isNew = false }) => {
                           </span>
                         </div>
                         <div className="text-sm text-gray-500">
-                          {prescription.medications.map((med, idx) => (
-                            <span key={idx} className="mr-2">
-                              {med.name} {med.dosage} {med.frequency.toLowerCase()}
-                              {idx < prescription.medications.length - 1 ? ',' : ''}
-                            </span>
-                          ))}
+                          {prescription.medications && prescription.medications.length > 0 ? (
+                            prescription.medications.map((med, idx) => (
+                              <span key={idx} className="mr-2">
+                                {med.name} {med.dosage} {med.frequency?.toLowerCase() || ''}
+                                {idx < prescription.medications.length - 1 ? ', ' : ''}
+                              </span>
+                            ))
+                          ) : (
+                            <span>No medications listed</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -492,17 +507,27 @@ const Prescriptions = ({ isNew = false }) => {
                       <div className="flex space-x-2">
                         <button
                           onClick={(e) => handlePrintPrescription(e, prescription.id)}
-                          className="p-1 text-gray-400 hover:text-gray-600 focus:outline-none"
+                          className="p-1 text-gray-400 hover:text-blue-600 focus:outline-none transition-colors"
                           title="Print"
+                          disabled={isGeneratingPdf}
                         >
-                          <Printer className="h-5 w-5" />
+                          {isGeneratingPdf ? (
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <Printer className="h-5 w-5" />
+                          )}
                         </button>
                         <button
-                          onClick={(e) => handleDownloadPrescription(e, prescription.id)}
-                          className="p-1 text-gray-400 hover:text-gray-600 focus:outline-none"
-                          title="Download"
+                          onClick={(e) => handleDownloadPdf(e, prescription.id)}
+                          className="p-1 text-gray-400 hover:text-green-600 focus:outline-none transition-colors"
+                          title="Download PDF"
+                          disabled={isGeneratingPdf}
                         >
-                          <Download className="h-5 w-5" />
+                          {isGeneratingPdf ? (
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <Download className="h-5 w-5" />
+                          )}
                         </button>
                         <button
                           onClick={(e) => handleSharePrescription(e, prescription.id)}

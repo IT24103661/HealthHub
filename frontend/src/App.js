@@ -18,6 +18,7 @@ import DoctorDashboard from './pages/doctor/Dashboard';
 import DoctorAppointments from './pages/doctor/Appointments';
 import DoctorPatients from './pages/doctor/Patients';
 import DoctorPrescriptions from './pages/doctor/Prescriptions';
+import PrescriptionForm from './pages/doctor/PrescriptionForm';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -128,22 +129,32 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/doctor/prescriptions"
-        element={
-          <ProtectedRoute allowedRoles={['doctor']}>
-            <DoctorPrescriptions />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/doctor/prescriptions/new"
-        element={
-          <ProtectedRoute allowedRoles={['doctor']}>
-            <DoctorPrescriptions isNew={true} />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/doctor/prescriptions">
+        <Route
+          index
+          element={
+            <ProtectedRoute allowedRoles={['doctor']}>
+              <DoctorPrescriptions />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="new"
+          element={
+            <ProtectedRoute allowedRoles={['doctor']}>
+              <PrescriptionForm />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="edit/:id"
+          element={
+            <ProtectedRoute allowedRoles={['doctor']}>
+              <PrescriptionForm isEditing={true} />
+            </ProtectedRoute>
+          }
+        />
+      </Route>
       <Route
         path="/diet-plans"
         element={
