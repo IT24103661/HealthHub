@@ -52,11 +52,20 @@ public class PrescriptionRequest {
     }
     
     public static class MedicationDto {
+        private Long id;
         private String name;
         private String dosage;
         private String frequency;
         private String duration;
         private String instructions;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
 
         public String getName() {
             return name;

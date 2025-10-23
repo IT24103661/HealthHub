@@ -19,6 +19,7 @@ import DoctorAppointments from './pages/doctor/Appointments';
 import DoctorPatients from './pages/doctor/Patients';
 import DoctorPrescriptions from './pages/doctor/Prescriptions';
 import PrescriptionForm from './pages/doctor/PrescriptionForm';
+import EditPrescription from './pages/doctor/EditPrescription';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -150,7 +151,7 @@ function AppRoutes() {
           path="edit/:id"
           element={
             <ProtectedRoute allowedRoles={['doctor']}>
-              <PrescriptionForm isEditing={true} />
+              <EditPrescription />
             </ProtectedRoute>
           }
         />

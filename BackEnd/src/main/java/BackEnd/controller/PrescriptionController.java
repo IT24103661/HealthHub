@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/prescriptions")
@@ -34,6 +35,18 @@ public class PrescriptionController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
+    @GetMapping("/all-patients")
+    public ResponseEntity<List<Map<String, Object>>> getPatientsWithPrescriptions() {
+        try {
+            List<Map<String, Object>> patients = prescriptionService.getPatientsWithPrescriptions();
+            return ResponseEntity.ok(patients);
+        } catch (Exception e) {
+            System.err.println("Error in getPatientsWithPrescriptions: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
     @GetMapping("/patient/{patientId}")
     public ResponseEntity<List<PrescriptionResponse>> getPatientPrescriptions(
             @PathVariable Long patientId) {
@@ -41,15 +54,41 @@ public class PrescriptionController {
         return ResponseEntity.ok(prescriptions);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/prescription/{id}")
     public ResponseEntity<PrescriptionResponse> getPrescription(@PathVariable Long id) {
         PrescriptionResponse response = prescriptionService.getPrescriptionById(id);
         return ResponseEntity.ok(response);
+    }
+    
+    @PutMapping("/prescription/{id}")
+    public ResponseEntity<PrescriptionResponse> updatePrescription(
+            @PathVariable Long id,
+            @Valid @RequestBody PrescriptionRequest request) {
+        try {
+            PrescriptionResponse response = prescriptionService.updatePrescription(id, request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("Error updating prescription: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
     
     @GetMapping
     public ResponseEntity<List<PrescriptionResponse>> getAllPrescriptions() {
         List<PrescriptionResponse> prescriptions = prescriptionService.getAllPrescriptions();
         return ResponseEntity.ok(prescriptions);
+    }
+    
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deletePrescription(@PathVariable Long id) {
+        try {
+            prescriptionService.deletePrescription(id);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            System.err.println("Error deleting prescription: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 }
