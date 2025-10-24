@@ -7,13 +7,14 @@ import Signup from './pages/Signup';
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import HealthData from './pages/HealthData';
+import ViewHealthData from './pages/ViewHealthData';
 import DietPlans from './pages/DietPlans';
 import ScheduleCheckup from './pages/ScheduleCheckup';
 import Reports from './pages/Reports';
 import AdminDashboard from './pages/AdminDashboard';
 import ReceptionistDashboard from './pages/ReceptionistDashboard';
 import AppointmentManagement from './pages/appointment/AppointmentManagement';
-import DietitianDashboard from './pages/DietitianDashboard';
+import ReceptionistDoctors from './pages/receptionist/Doctors';
 import AuditLogs from './pages/AuditLogs';
 import DoctorDashboard from './pages/doctor/Dashboard';
 import DoctorAppointments from './pages/doctor/Appointments';
@@ -21,6 +22,10 @@ import DoctorPatients from './pages/doctor/Patients';
 import DoctorPrescriptions from './pages/doctor/Prescriptions';
 import PrescriptionForm from './pages/doctor/PrescriptionForm';
 import EditPrescription from './pages/doctor/EditPrescription';
+import DietitianDashboard from './pages/dietitian/Dashboard';
+import DietitianPatients from './pages/dietitian/Patients';
+import DietitianDietPlans from './pages/dietitian/DietPlans';
+import EditDietPlan from './pages/dietitian/components/EditDietPlan';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -87,6 +92,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={['user']}>
             <HealthData />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/health-data/view/:id"
+        element={
+          <ProtectedRoute allowedRoles={['user']}>
+            <ViewHealthData />
           </ProtectedRoute>
         }
       />
@@ -184,16 +197,60 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/receptionist/doctors"
+        element={
+          <ProtectedRoute allowedRoles={['receptionist']}>
+            <ReceptionistDoctors />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Dietitian Routes */}
 
       {/* Dietitian Routes */}
       <Route
-        path="/dietitian/diet-plans"
+        path="/dietitian/dashboard"
         element={
           <ProtectedRoute allowedRoles={['dietitian']}>
             <DietitianDashboard />
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/dietitian/patients"
+        element={
+          <ProtectedRoute allowedRoles={['dietitian']}>
+            <DietitianPatients />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/dietitian/plans">
+        <Route
+          index
+          element={
+            <ProtectedRoute allowedRoles={['dietitian']}>
+              <DietitianDietPlans />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="new"
+          element={
+            <ProtectedRoute allowedRoles={['dietitian']}>
+              <EditDietPlan />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path=":id/edit"
+          element={
+            <ProtectedRoute allowedRoles={['dietitian']}>
+              <EditDietPlan />
+            </ProtectedRoute>
+          }
+        />
+      </Route>
 
       {/* Admin Routes */}
       <Route

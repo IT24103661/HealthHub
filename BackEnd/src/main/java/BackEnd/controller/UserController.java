@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:3000")
@@ -25,18 +26,39 @@ public class UserController {
     @GetMapping
     public ResponseEntity<?> getAllUsers() {
         try {
+            System.out.println("Fetching all users...");
             List<User> users = userRepository.findAll();
-            // Remove passwords from response
-            users.forEach(user -> user.setPassword(null));
+            System.out.println("Found " + users.size() + " users");
+            
+            // Create a list of DTOs to avoid lazy loading issues
+            List<Map<String, Object>> userDtos = users.stream().map(user -> {
+                Map<String, Object> dto = new HashMap<>();
+                dto.put("id", user.getId());
+                dto.put("fullName", user.getFullName());
+                dto.put("email", user.getEmail());
+                dto.put("role", user.getRole());
+                dto.put("phone", user.getPhone());
+                dto.put("status", user.getStatus());
+                // Add other non-sensitive fields as needed
+                return dto;
+            }).collect(Collectors.toList());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("users", users);
+            response.put("users", userDtos);
             return ResponseEntity.ok(response);
+            
         } catch (Exception e) {
+            System.err.println("Error fetching users: " + e.getMessage());
+            e.printStackTrace();
+            
             Map<String, Object> response = new HashMap<>();
             response.put("success", false);
             response.put("message", "Failed to fetch users: " + e.getMessage());
+            response.put("errorType", e.getClass().getName());
+            if (e.getCause() != null) {
+                response.put("cause", e.getCause().getMessage());
+            }
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }

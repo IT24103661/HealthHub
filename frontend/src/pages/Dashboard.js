@@ -1,20 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Badge from '../components/Badge';
 import Table from '../components/Table';
-import { Activity, Calendar, FileText, Users, TrendingUp, Clock } from 'lucide-react';
+import { Activity, Calendar, FileText, Users, TrendingUp, Clock, Eye, Edit, Trash2, Search, Download } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { toast } from 'react-toastify';
 
 const Dashboard = () => {
   const { user, users, notifications, appointments, dietPlans, reports } = useApp();
   const navigate = useNavigate();
   const [healthData, setHealthData] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  // Calculate derived health data
-  const latestHealthData = healthData.length > 0 ? healthData[healthData.length - 1] : null;
+  // Filter health data based on search term
+  const filteredHealthData = useMemo(() => {
+    if (!searchTerm) return healthData;
+    
+    const term = searchTerm.toLowerCase();
+    return healthData.filter(item => {
+      return (
+        String(item.age || '').toLowerCase().includes(term) ||
+        String(item.weight || '').toLowerCase().includes(term) ||
+        String(item.height || '').toLowerCase().includes(term) ||
+        String(item.activityLevel || '').toLowerCase().includes(term) ||
+        String(item.healthGoal || '').toLowerCase().includes(term) ||
+        new Date(item.date).toLocaleDateString().toLowerCase().includes(term)
+      );
+    });
+  }, [healthData, searchTerm]);
+
+  // Calculate derived health data from filtered data
+  const latestHealthData = filteredHealthData.length > 0 ? filteredHealthData[filteredHealthData.length - 1] : null;
   const previousHealthData = healthData.length > 1 ? healthData[healthData.length - 2] : null;
   
   // Calculate weight difference if we have at least 2 entries
@@ -30,13 +51,18 @@ const Dashboard = () => {
     const fetchHealthData = async () => {
       if (user && user.id) {
         try {
-          const response = await fetch('http://localhost:8080/healthdata');
+          const response = await fetch(`http://localhost:8080/healthdata/user/${user.id}`);
           const data = await response.json();
-          // Filter and sort data for current user by date (newest first)
-          const userHealthData = data
-            .filter(item => item.userId === user.id)
-            .sort((a, b) => new Date(b.date) - new Date(a.date));
-          setHealthData(userHealthData);
+          console.log('Fetched health data:', data);
+          
+          // Process and sort data by date (newest first)
+          const processedData = data.map(item => ({
+            ...item,
+            // Ensure date is in a consistent format
+            date: item.date || item.createdAt || new Date().toISOString()
+          })).sort((a, b) => new Date(b.date) - new Date(a.date));
+          
+          setHealthData(processedData);
         } catch (error) {
           console.error('Error fetching health data:', error);
           toast.error('Failed to load health data');
@@ -45,6 +71,120 @@ const Dashboard = () => {
     };
     fetchHealthData();
   }, [user]);
+
+  const handleDownloadReport = () => {
+    if (filteredHealthData.length === 0) return;
+    
+    setIsDownloading(true);
+    
+    // Initialize PDF
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    // Add header
+    doc.setFontSize(20);
+    doc.setTextColor(40);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Health Data Report', pageWidth / 2, 20, { align: 'center' });
+    
+    // Add date and user info
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 35);
+    if (user) {
+      doc.text(`Patient: ${user.name || 'N/A'}`, 14, 42);
+    }
+    
+    // Add line under header
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, 50, pageWidth - 14, 50);
+    
+    // Prepare data for the table
+    const tableColumn = ['Date', 'Age', 'Weight (kg)', 'Height (cm)', 'Activity Level', 'Health Goal'];
+    const tableRows = [];
+    
+    filteredHealthData.forEach(item => {
+      const data = [
+        new Date(item.date).toLocaleDateString(),
+        item.age || 'N/A',
+        item.weight ? `${item.weight} kg` : 'N/A',
+        item.height ? `${item.height} cm` : 'N/A',
+        item.activityLevel || 'N/A',
+        item.healthGoal || 'N/A'
+      ];
+      tableRows.push(data);
+    });
+    
+    // Add table to PDF
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 60,
+      margin: { left: 15, right: 15 },
+      styles: { 
+        fontSize: 9,
+        cellPadding: 3,
+        overflow: 'linebreak',
+        lineWidth: 0.1,
+        lineColor: 200,
+        fillColor: [255, 255, 255],
+        textColor: [40, 40, 40],
+        font: 'helvetica',
+      },
+      headStyles: {
+        fillColor: [41, 128, 185],
+        textColor: 255,
+        fontStyle: 'bold',
+        lineWidth: 0.1,
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245]
+      },
+      didDrawPage: function(data) {
+        // Footer
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.text(
+          `Page ${data.pageNumber} of ${pageCount}`,
+          pageWidth / 2,
+          doc.internal.pageSize.getHeight() - 10,
+          { align: 'center' }
+        );
+      }
+    });
+    
+    // Add summary section if there's data
+    if (filteredHealthData.length > 0) {
+      const latest = filteredHealthData[0];
+      const startY = doc.lastAutoTable.finalY + 15;
+      
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Latest Health Summary', 14, startY);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      
+      const summary = [
+        `Age: ${latest.age || 'N/A'}`,
+        `Weight: ${latest.weight ? `${latest.weight} kg` : 'N/A'}`,
+        `Height: ${latest.height ? `${latest.height} cm` : 'N/A'}`,
+        `BMI: ${latest.weight && latest.height ? (latest.weight / ((latest.height / 100) ** 2)).toFixed(1) : 'N/A'}`,
+        `Activity Level: ${latest.activityLevel || 'N/A'}`,
+        `Health Goal: ${latest.healthGoal || 'N/A'}`
+      ];
+      
+      summary.forEach((line, index) => {
+        doc.text(line, 20, startY + 10 + (index * 6));
+      });
+    }
+    
+    // Save the PDF
+    doc.save(`health-report-${new Date().toISOString().split('T')[0]}.pdf`);
+    
+    setIsDownloading(false);
+    toast.success('PDF report downloaded successfully!');
+  };
 
   const handleDeleteHealthData = async (id) => {
     if (window.confirm('Are you sure you want to delete this health data?')) {
@@ -63,7 +203,31 @@ const Dashboard = () => {
   const healthDataColumns = [
     {
       header: 'Date',
-      render: (row) => new Date().toLocaleDateString(),
+      render: (row) => {
+        try {
+          const dateValue = row.date || row.createdAt;
+          if (!dateValue) return 'N/A';
+          
+          // Handle different date formats
+          let date;
+          if (typeof dateValue === 'string') {
+            date = new Date(dateValue);
+          } else if (dateValue.seconds) {
+            // Handle Firebase timestamp format
+            date = new Date(dateValue.seconds * 1000);
+          } else if (dateValue._seconds) {
+            // Handle another possible Firebase timestamp format
+            date = new Date(dateValue._seconds * 1000);
+          } else {
+            date = new Date(dateValue);
+          }
+          
+          return !isNaN(date.getTime()) ? date.toLocaleDateString() : 'N/A';
+        } catch (error) {
+          console.error('Error formatting date:', error, 'Row data:', row);
+          return 'N/A';
+        }
+      },
     },
     {
       header: 'Age',
@@ -103,17 +267,30 @@ const Dashboard = () => {
         <div className="flex gap-2">
           <Button
             size="sm"
+            variant="outline"
+            onClick={() => navigate(`/health-data/view/${row.id}`)}
+            title="View Details"
+            className="p-1"
+          >
+            <Eye size={16} />
+          </Button>
+          <Button
+            size="sm"
             variant="primary"
             onClick={() => navigate('/health-data', { state: { editData: row } })}
+            title="Edit"
+            className="p-1"
           >
-            Edit
+            <Edit size={16} />
           </Button>
           <Button
             size="sm"
             variant="danger"
             onClick={() => handleDeleteHealthData(row.id)}
+            title="Delete"
+            className="p-1"
           >
-            Delete
+            <Trash2 size={16} />
           </Button>
         </div>
       ),
@@ -211,20 +388,43 @@ const Dashboard = () => {
 
       {/* Health Data Table */}
       <Card title="My Health Data" className="mb-6">
-        {healthData.length === 0 ? (
-          <div className="text-center py-12">
-            <Activity className="mx-auto text-gray-400 mb-4" size={48} />
-            <p className="text-gray-500 mb-4">No health data recorded yet</p>
-            <Button
-              variant="primary"
-              onClick={() => navigate('/health-data')}
-            >
-              Add Health Data
-            </Button>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full">
+          <h2 className="text-lg font-medium text-gray-900">Health Data History</h2>
+          <div className="relative w-full sm:w-64">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search records..."
+              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
-        ) : (
-          <Table columns={healthDataColumns} data={healthData} />
-        )}
+          <button
+            onClick={handleDownloadReport}
+            disabled={isDownloading || filteredHealthData.length === 0}
+            className={`ml-2 p-2 rounded-md flex items-center ${isDownloading || filteredHealthData.length === 0 ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+            title={filteredHealthData.length === 0 ? 'No data to download' : 'Download report as CSV'}
+          >
+            <Download className="h-5 w-5" />
+            <span className="ml-1 text-sm hidden sm:inline">Download</span>
+          </button>
+        </div>
+        <div className="mt-6 bg-white shadow rounded-lg overflow-hidden">
+          {filteredHealthData.length === 0 ? (
+            <div className="p-6 text-center text-gray-500">
+              {searchTerm ? 'No matching records found' : 'No health data available'}
+            </div>
+          ) : (
+            <Table
+              columns={healthDataColumns}
+              data={filteredHealthData}
+              onRowClick={(row) => navigate(`/health-data/view/${row.id}`)}
+            />
+          )}
+        </div>
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

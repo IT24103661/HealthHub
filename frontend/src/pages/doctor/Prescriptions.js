@@ -46,6 +46,7 @@ const Prescriptions = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const prescriptionsPerPage = 8;
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   // Fetch prescriptions from API
   useEffect(() => {
@@ -327,6 +328,166 @@ const Prescriptions = () => {
     // Implement download functionality
   };
 
+  const generatePrescriptionReport = async () => {
+    try {
+      setIsGeneratingReport(true);
+      const { jsPDF } = await import('jspdf');
+      
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 10;
+      const tableTop = 40;
+      
+      // Add header
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(63, 81, 181);
+      doc.text('PRESCRIPTIONS REPORT - HEALTHHUB', pageWidth / 2, 15, { align: 'center' });
+      
+      // Report info
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, margin, 25);
+      doc.text(`Total Prescriptions: ${filteredPrescriptions.length}`, margin, 30);
+      
+      // Add filter info
+      if (statusFilter !== 'all' || dateFilter !== 'all' || searchTerm) {
+        let filterText = 'Filters: ';
+        const filters = [];
+        if (statusFilter !== 'all') filters.push(`Status: ${statusFilter}`);
+        if (dateFilter !== 'all') filters.push(`Date: ${dateFilter}`);
+        if (searchTerm) filters.push(`Search: "${searchTerm}"`);
+        
+        doc.text(filterText + filters.join(', '), margin, 35);
+      }
+      
+      // Table headers
+      const headers = [
+        'Patient',
+        'Date',
+        'Medications',
+        'Status',
+        'Valid Until'
+      ];
+      
+      const colWidths = [40, 30, 70, 25, 30];
+      const headerY = tableTop;
+      
+      // Draw header background
+      doc.setFillColor(63, 81, 181);
+      doc.rect(margin, headerY, pageWidth - (margin * 2), 10, 'F');
+      
+      // Add header text
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      
+      let xPos = margin + 5;
+      headers.forEach((header, index) => {
+        doc.text(header, xPos, headerY + 7);
+        xPos += colWidths[index] + 5;
+      });
+      
+      // Add data rows
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      
+      let yPos = tableTop + 15;
+      
+      filteredPrescriptions.forEach((prescription, index) => {
+        if (yPos > 180) { // Check for page break
+          doc.addPage();
+          yPos = 30;
+        }
+        
+        // Alternate row color
+        const isEven = index % 2 === 0;
+        doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 248, isEven ? 255 : 248);
+        doc.rect(margin, yPos - 5, pageWidth - (margin * 2), 10, 'F');
+        
+        // Draw cell data
+        xPos = margin + 5;
+        
+        // Patient Name
+        doc.text(prescription.patientName || 'N/A', xPos, yPos);
+        xPos += colWidths[0] + 5;
+        
+        // Date
+        const formattedDate = prescription.prescriptionDate 
+          ? format(new Date(prescription.prescriptionDate), 'MMM d, yyyy')
+          : 'N/A';
+        doc.text(formattedDate, xPos, yPos);
+        xPos += colWidths[1] + 5;
+        
+        // Medications (truncated)
+        let medsText = 'No medications';
+        if (prescription.medications && prescription.medications.length > 0) {
+          medsText = prescription.medications
+            .slice(0, 2) // Show max 2 medications in the report
+            .map(med => med.name + (med.dosage ? ` (${med.dosage})` : ''))
+            .join(', ');
+          
+          if (prescription.medications.length > 2) {
+            medsText += ` +${prescription.medications.length - 2} more`;
+          }
+        }
+        
+        const maxMedsLength = 60;
+        if (medsText.length > maxMedsLength) {
+          medsText = medsText.substring(0, maxMedsLength) + '...';
+        }
+        doc.text(medsText, xPos, yPos);
+        xPos += colWidths[2] + 5;
+        
+        // Status with color coding
+        const status = prescription.status || 'active';
+        const statusColor = 
+          status === 'active' ? [25, 135, 84] :
+          status === 'expired' ? [220, 53, 69] :
+          status === 'completed' ? [13, 110, 253] :
+          [108, 117, 125]; // Default gray
+        
+        doc.setTextColor(...statusColor);
+        doc.text(status.charAt(0).toUpperCase() + status.slice(1), xPos, yPos);
+        doc.setTextColor(0, 0, 0);
+        xPos += colWidths[3] + 5;
+        
+        // Valid Until
+        const validUntil = prescription.validUntil 
+          ? format(new Date(prescription.validUntil), 'MMM d, yyyy')
+          : 'N/A';
+        doc.text(validUntil, xPos, yPos);
+        
+        yPos += 7;
+      });
+      
+      // Add footer
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${i} of ${pageCount} • Generated by HealthHub`,
+          pageWidth / 2,
+          doc.internal.pageSize.getHeight() - 10,
+          { align: 'center' }
+        );
+      }
+      
+      // Save the PDF
+      const reportDate = new Date().toISOString().split('T')[0];
+      doc.save(`prescriptions-report-${reportDate}.pdf`);
+      
+    } catch (error) {
+      console.error('Error generating report:', error);
+      alert('Failed to generate report. Please try again.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   const handleSharePrescription = (e, id) => {
     e.stopPropagation();
     const prescription = prescriptions.find(p => p.id === id);
@@ -391,14 +552,34 @@ const Prescriptions = () => {
             <p className="mt-1 text-sm text-gray-500">Manage and track all patient prescriptions</p>
           </div>
           <div className="mt-4 flex md:mt-0 md:ml-4">
-            <button
-              type="button"
-              onClick={handleNewPrescription}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              <Plus className="-ml-1 mr-2 h-5 w-5" />
-              New Prescription
-            </button>
+            <div className="flex space-x-3">
+              <button
+                type="button"
+                onClick={generatePrescriptionReport}
+                disabled={isGeneratingReport || filteredPrescriptions.length === 0}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGeneratingReport ? (
+                  <>
+                    <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-blue-600" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
+                    Download Report
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleNewPrescription}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                <Plus className="-ml-1 mr-2 h-5 w-5" />
+                New Prescription
+              </button>
+            </div>
           </div>
         </div>
 

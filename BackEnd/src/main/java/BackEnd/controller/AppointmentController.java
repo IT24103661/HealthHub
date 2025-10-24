@@ -25,15 +25,28 @@ public class AppointmentController {
     @GetMapping
     public ResponseEntity<?> getAllAppointments() {
         try {
+            System.out.println("Fetching all appointments...");
             List<Appointment> appointments = appointmentService.getAllAppointments();
+            System.out.println("Found " + appointments.size() + " appointments");
+            
+            // Log first few appointments for debugging
+            int maxToLog = Math.min(3, appointments.size());
+            for (int i = 0; i < maxToLog; i++) {
+                System.out.println("Appointment " + (i+1) + ": " + appointments.get(i).toString());
+            }
+            
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("appointments", appointments);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
+            System.err.println("Error in getAllAppointments: " + e.getMessage());
+            e.printStackTrace();
+            
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("message", "Failed to fetch appointments: " + e.getMessage());
+            errorResponse.put("errorType", e.getClass().getName());
             return ResponseEntity.status(500).body(errorResponse);
         }
     }

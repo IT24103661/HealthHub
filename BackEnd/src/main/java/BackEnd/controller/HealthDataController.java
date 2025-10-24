@@ -32,6 +32,11 @@ public class HealthDataController {
         return healthDataRepository.findById(id)
                 .orElseThrow(() -> new InventryNotFoundException(id));
     }
+    
+    @GetMapping("/user/{userId}")
+    public List<HealthData> getHealthDataByUserId(@PathVariable Long userId) {
+        return healthDataRepository.findByUserId(userId);
+    }
 
     @PutMapping("/{id}")
     public HealthData updateHealthData(@PathVariable Long id, @Valid @RequestBody HealthData updatedHealthData) {

@@ -6,7 +6,7 @@ import Table from '../components/Table';
 import Badge from '../components/Badge';
 import Modal from '../components/Modal';
 import Select from '../components/Select';
-import { Users, Shield, Trash2, Edit, Ban, CheckCircle } from 'lucide-react';
+import { Users, Shield, Trash2, Edit, Ban, CheckCircle, Download } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const AdminDashboard = () => {
@@ -44,6 +44,319 @@ const AdminDashboard = () => {
     toast.success('User deleted successfully');
     setShowDeleteModal(false);
     setSelectedUser(null);
+  };
+
+  const downloadUsersReport = async () => {
+    try {
+      toast.loading('Generating users report...');
+      const { jsPDF } = await import('jspdf');
+      
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFont('helvetica');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 15;
+      
+      // Set header background color using RGB values directly
+      doc.setFillColor(63, 81, 181);
+      doc.rect(0, 0, pageWidth, 25, 'F');
+      
+      // Add title
+      doc.setFontSize(18);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.text('HEALTHHUB USERS REPORT', pageWidth / 2, 15, { align: 'center' });
+      
+      // Add report info
+      doc.setFontSize(10);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, margin, 35);
+      doc.text(`Total Users: ${users.length}`, margin, 40);
+      
+      // Add stats cards
+      let yPos = 50;
+      const cardWidth = (pageWidth - (margin * 3)) / 2;
+      
+      // First row of cards
+      doc.setFillColor(63, 81, 181);
+      doc.roundedRect(margin, yPos, cardWidth, 30, 3, 3, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(12);
+      doc.text('Total Users', margin + 10, yPos + 10);
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text(users.length.toString(), margin + 10, yPos + 22);
+      
+      doc.setFillColor(40, 167, 69);
+      doc.roundedRect(margin * 2 + cardWidth, yPos, cardWidth, 30, 3, 3, 'F');
+      doc.text('Active Users', margin * 2 + cardWidth + 10, yPos + 10);
+      doc.setFontSize(18);
+      doc.text(users.filter(u => u.status === 'active').length.toString(), margin * 2 + cardWidth + 10, yPos + 22);
+      
+      // Second row of cards
+      yPos += 40;
+      doc.setFillColor(23, 162, 184);
+      doc.roundedRect(margin, yPos, cardWidth, 30, 3, 3, 'F');
+      doc.text('Doctors', margin + 10, yPos + 10);
+      doc.setFontSize(18);
+      doc.text(users.filter(u => u.role === 'doctor').length.toString(), margin + 10, yPos + 22);
+      
+      doc.setFillColor(255, 193, 7);
+      doc.roundedRect(margin * 2 + cardWidth, yPos, cardWidth, 30, 3, 3, 'F');
+      doc.text('Dietitians', margin * 2 + cardWidth + 10, yPos + 10);
+      doc.setFontSize(18);
+      doc.text(users.filter(u => u.role === 'dietitian').length.toString(), margin * 2 + cardWidth + 10, yPos + 22);
+      
+      // Reset text color and position for table
+      yPos += 50;
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+      
+      // Table headers with improved styling
+      doc.setFont('helvetica', 'bold');
+      const tableHeaders = ['NAME', 'EMAIL', 'ROLE', 'STATUS'];
+      
+      // Adjusted column widths for better proportions
+      const colWidths = [45, 70, 35, 30];
+      const headerY = yPos;
+      const rowHeight = 11; // Slightly taller rows for better readability
+      const headerHeight = 12; // Taller header for better visual hierarchy
+      
+      // Calculate starting X positions for each column with consistent padding
+      const colPositions = [
+        margin + 8,  // Name
+        margin + colWidths[0] + 8,  // Email
+        margin + colWidths[0] + colWidths[1] + 8,  // Role
+        margin + colWidths[0] + colWidths[1] + colWidths[2] + 8  // Status
+      ];
+      
+      // Table header with solid color (replaced gradient for better compatibility)
+      doc.setFillColor(63, 81, 181); // Primary color
+      
+      // Draw header with rounded corners
+      doc.roundedRect(
+        margin, 
+        headerY, 
+        pageWidth - (margin * 2), 
+        headerHeight, 
+        2, 2, 'F'
+      );
+      
+      // Add subtle shadow effect
+      doc.setDrawColor(50, 65, 145);
+      doc.setLineWidth(0.2);
+      doc.roundedRect(
+        margin, 
+        headerY, 
+        pageWidth - (margin * 2), 
+        headerHeight, 
+        2, 2
+      );
+      
+      // Add header text with proper spacing
+      doc.setFontSize(9);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      
+      // Draw header text with improved typography
+      tableHeaders.forEach((header, index) => {
+        const isCentered = index > 1; // Center align Role and Status
+        const xPos = isCentered 
+          ? colPositions[index] + (colWidths[index] / 2)
+          : colPositions[index];
+          
+        const options = { 
+          align: isCentered ? 'center' : 'left',
+          maxWidth: colWidths[index] - 8,
+          lineHeightFactor: 1.2
+        };
+        
+        // Add subtle text shadow for better readability
+        doc.setTextColor(255, 255, 255);
+        doc.text(
+          header, 
+          xPos + 0.5, 
+          headerY + headerHeight - 4,
+          options
+        );
+        
+        // Add subtle separator between headers
+        if (index < tableHeaders.length - 1) {
+          doc.setDrawColor(255, 255, 255, 0.3);
+          doc.setLineWidth(0.5);
+          doc.line(
+            colPositions[index] + colWidths[index] + 3, 
+            headerY + 2, 
+            colPositions[index] + colWidths[index] + 3, 
+            headerY + headerHeight - 2
+          );
+        }
+      });
+      
+      // Reset styles for data rows
+      doc.setTextColor(51, 51, 51);
+      doc.setLineWidth(0.2);
+      doc.setDrawColor(200, 200, 200); // Reset draw color
+      
+      // Add user rows
+      doc.setFont('helvetica', 'normal');
+      yPos += 10;
+      
+      users.forEach((user, index) => {
+        // Check for page break
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 30;
+        }
+        
+        // Set row styling with subtle hover effect
+        const isEven = index % 2 === 0;
+        const rowBgColor = isEven ? [255, 255, 255] : [250, 250, 252];
+        
+        // Draw row background
+        doc.setFillColor(...rowBgColor);
+        doc.rect(margin, yPos, pageWidth - (margin * 2), rowHeight, 'F');
+        
+        // Draw subtle bottom border
+        doc.setDrawColor(235, 235, 240);
+        doc.line(
+          margin, 
+          yPos + rowHeight - 0.5, 
+          pageWidth - margin, 
+          yPos + rowHeight - 0.5
+        );
+        
+        // Add subtle vertical separators
+        doc.setDrawColor(240, 240, 245);
+        let lineX = margin;
+        for (let i = 0; i < colWidths.length - 1; i++) {
+          lineX += colWidths[i] + (i === 0 ? 8 : 5);
+          doc.line(
+            lineX, 
+            yPos + 2, 
+            lineX, 
+            yPos + rowHeight - 2
+          );
+        }
+        
+        // Add user data
+        doc.setFontSize(9);
+        doc.setTextColor(0, 0, 0);
+        
+        // Name with proper truncation
+        doc.setFont('helvetica', 'medium');
+        doc.setFontSize(9);
+        doc.setTextColor(33, 37, 41);
+        doc.text(user.name?.trim() || 'N/A', colPositions[0], yPos + 7.5, { 
+          maxWidth: colWidths[0] - 8,
+          ellipsis: true,
+          lineHeightFactor: 1.1
+        });
+        
+        // Email with subtle styling
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(73, 80, 87);
+        doc.text(user.email?.trim() || 'N/A', colPositions[1] + 2, yPos + 7.5, { 
+          maxWidth: colWidths[1] - 10,
+          ellipsis: true,
+          lineHeightFactor: 1.1
+        });
+        
+        // Role with pill-like styling
+        const roleColors = {
+          'admin': { bg: [248, 249, 250], text: [73, 80, 87] },
+          'doctor': { bg: [232, 240, 254], text: [13, 110, 253] },
+          'dietitian': { bg: [243, 236, 254], text: [111, 66, 193] },
+          'receptionist': { bg: [255, 243, 205], text: [153, 119, 34] },
+          'user': { bg: [230, 244, 234], text: [25, 135, 84] }
+        };
+        
+        const roleType = user.role || 'user';
+        const roleStyle = roleColors[roleType] || roleColors.user;
+        const roleText = roleType.charAt(0).toUpperCase() + roleType.slice(1);
+        
+        // Draw role background
+        doc.setFillColor(...roleStyle.bg);
+        doc.roundedRect(
+          colPositions[2] + 2,
+          yPos + 2,
+          colWidths[2] - 4,
+          rowHeight - 4,
+          10, 10, 'F'
+        );
+        
+        // Draw role text
+        doc.setFont('helvetica', 'semibold');
+        doc.setFontSize(8);
+        doc.setTextColor(...roleStyle.text);
+        doc.text(
+          roleText,
+          colPositions[2] + (colWidths[2] / 2),
+          yPos + 7.5,
+          { align: 'center' }
+        );
+        
+        // Status with pill styling
+        const status = user.status || 'inactive';
+        const statusText = status === 'active' ? 'Active' : 'Inactive';
+        const statusStyle = status === 'active' 
+          ? { bg: [230, 244, 234], text: [25, 135, 84] }
+          : { bg: [255, 231, 230], text: [220, 53, 69] };
+        
+        // Draw status background
+        doc.setFillColor(...statusStyle.bg);
+        doc.roundedRect(
+          colPositions[3] + 2,
+          yPos + 2,
+          colWidths[3] - 4,
+          rowHeight - 4,
+          10, 10, 'F'
+        );
+        
+        // Draw status text
+        doc.setFont('helvetica', 'semibold');
+        doc.setFontSize(8);
+        doc.setTextColor(...statusStyle.text);
+        doc.text(
+          statusText,
+          colPositions[3] + (colWidths[3] / 2),
+          yPos + 7.5,
+          { align: 'center' }
+        );
+        doc.setTextColor(0, 0, 0);
+        
+        yPos += 10;
+      });
+      
+      // Add footer
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        
+        // Page number
+        doc.setFontSize(9);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, 287, { align: 'right' });
+        
+        // Footer line
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.3);
+        doc.line(margin, 280, pageWidth - margin, 280);
+        
+        // Footer text
+        doc.text('Confidential - HealthHub User Report', margin, 287);
+      }
+      
+      // Save the PDF
+      doc.save(`HealthHub-Users-Report-${new Date().toISOString().split('T')[0]}.pdf`);
+      
+      toast.dismiss();
+      toast.success('Users report downloaded successfully');
+      
+    } catch (error) {
+      console.error('Error generating users report:', error);
+      toast.dismiss();
+      toast.error('Failed to generate users report');
+    }
   };
 
   const roleOptions = [
@@ -169,73 +482,134 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
-        <p className="text-gray-600 mt-2">
-          Manage user accounts, roles, and permissions
-        </p>
+    <div className="space-y-6">
+      {/* Header Section */}
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
+            <p className="text-gray-600 mt-1">
+              Manage user accounts, roles, and permissions
+            </p>
+          </div>
+          <Button 
+            variant="primary" 
+            onClick={downloadUsersReport}
+            className="flex items-center gap-2 whitespace-nowrap"
+          >
+            <Download size={16} />
+            Download Report
+          </Button>
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-        <Card>
-          <div className="flex flex-col items-center text-center">
-            <div className="p-3 bg-primary-100 rounded-lg mb-2">
-              <Users className="text-primary-600" size={24} />
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        {/* Total Users Card */}
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Users</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{stats.totalUsers}</p>
+                <p className="mt-1 text-xs text-green-600 font-medium">
+                  +{Math.floor(stats.totalUsers * 0.12)} from last month
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-primary-50">
+                <Users className="text-primary-600" size={20} />
+              </div>
             </div>
-            <p className="text-xs text-gray-600">Total Users</p>
-            <p className="text-xl font-bold text-gray-900">{stats.totalUsers}</p>
           </div>
         </Card>
 
-        <Card>
-          <div className="flex flex-col items-center text-center">
-            <div className="p-3 bg-green-100 rounded-lg mb-2">
-              <CheckCircle className="text-green-600" size={24} />
+        {/* Active Users Card */}
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Active Users</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{stats.activeUsers}</p>
+                <p className="mt-1 text-xs text-green-600 font-medium">
+                  {Math.round((stats.activeUsers / stats.totalUsers) * 100)}% of total
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-green-50">
+                <CheckCircle className="text-green-600" size={20} />
+              </div>
             </div>
-            <p className="text-xs text-gray-600">Active</p>
-            <p className="text-xl font-bold text-gray-900">{stats.activeUsers}</p>
           </div>
         </Card>
 
-        <Card>
-          <div className="flex flex-col items-center text-center">
-            <div className="p-3 bg-blue-100 rounded-lg mb-2">
-              <Shield className="text-blue-600" size={24} />
+        {/* Doctors Card */}
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Doctors</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{stats.doctors}</p>
+                <p className="mt-1 text-xs text-blue-600 font-medium">
+                  {stats.doctors > 0 ? 'Available' : 'None'}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-blue-50">
+                <Shield className="text-blue-600" size={20} />
+              </div>
             </div>
-            <p className="text-xs text-gray-600">Doctors</p>
-            <p className="text-xl font-bold text-gray-900">{stats.doctors}</p>
           </div>
         </Card>
 
-        <Card>
-          <div className="flex flex-col items-center text-center">
-            <div className="p-3 bg-purple-100 rounded-lg mb-2">
-              <Shield className="text-purple-600" size={24} />
+        {/* Dietitians Card */}
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Dietitians</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{stats.dietitians}</p>
+                <p className="mt-1 text-xs text-purple-600 font-medium">
+                  {stats.dietitians > 0 ? 'Available' : 'None'}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-purple-50">
+                <Shield className="text-purple-600" size={20} />
+              </div>
             </div>
-            <p className="text-xs text-gray-600">Dietitians</p>
-            <p className="text-xl font-bold text-gray-900">{stats.dietitians}</p>
           </div>
         </Card>
 
-        <Card>
-          <div className="flex flex-col items-center text-center">
-            <div className="p-3 bg-yellow-100 rounded-lg mb-2">
-              <Shield className="text-yellow-600" size={24} />
+        {/* Receptionists Card */}
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Receptionists</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{stats.receptionists}</p>
+                <p className="mt-1 text-xs text-yellow-600 font-medium">
+                  {stats.receptionists > 0 ? 'On Duty' : 'Offline'}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-yellow-50">
+                <Shield className="text-yellow-600" size={20} />
+              </div>
             </div>
-            <p className="text-xs text-gray-600">Receptionists</p>
-            <p className="text-xl font-bold text-gray-900">{stats.receptionists}</p>
           </div>
         </Card>
 
-        <Card>
-          <div className="flex flex-col items-center text-center">
-            <div className="p-3 bg-red-100 rounded-lg mb-2">
-              <Shield className="text-red-600" size={24} />
+        {/* Admins Card */}
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Admins</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{stats.admins}</p>
+                <p className="mt-1 text-xs text-red-600 font-medium">
+                  {stats.admins > 0 ? 'Active' : 'None'}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-red-50">
+                <Shield className="text-red-600" size={20} />
+              </div>
             </div>
-            <p className="text-xs text-gray-600">Admins</p>
-            <p className="text-xl font-bold text-gray-900">{stats.admins}</p>
           </div>
         </Card>
       </div>

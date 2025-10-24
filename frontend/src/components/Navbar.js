@@ -34,10 +34,11 @@ const Navbar = () => {
     receptionist: [
       { path: '/receptionist/dashboard', label: 'Dashboard' },
       { path: '/receptionist/appointments', label: 'Appointments' },
+      { path: '/receptionist/doctors', label: 'Doctors' },
     ],
     dietitian: [
-      { path: '/dashboard', label: 'Dashboard' },
-      { path: '/dietitian/diet-plans', label: 'Diet Plans' },
+      { path: '/dietitian/dashboard', label: 'Dashboard' },
+      { path: '/dietitian/plans', label: 'Diet Plans' },
       { path: '/dietitian/patients', label: 'Patients' },
     ],
     admin: [

@@ -39,6 +39,28 @@ export const AppProvider = ({ children }) => {
   // Add loading state
   const [isLoading, setIsLoading] = useState(true);
 
+  // Fetch health data for the current user
+  const fetchHealthData = async (userId) => {
+    try {
+      const response = await fetch(`http://localhost:8080/healthdata/user/${userId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch health data');
+      }
+      
+      const data = await response.json();
+      setHealthData(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error fetching health data:', error);
+      setHealthData([]);
+    }
+  };
+
   // Check for existing session on mount
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -47,6 +69,10 @@ export const AppProvider = ({ children }) => {
         const userData = JSON.parse(savedUser);
         setUser(userData);
         setIsAuthenticated(true);
+        // Fetch health data if user is logged in
+        if (userData.id) {
+          fetchHealthData(userData.id);
+        }
       } catch (error) {
         console.error('Error parsing user data:', error);
         localStorage.removeItem('user');
@@ -72,6 +98,7 @@ export const AppProvider = ({ children }) => {
         setUser(adminUser);
         setIsAuthenticated(true);
         localStorage.setItem('user', JSON.stringify(adminUser));
+        // No need to fetch health data for admin
         return Promise.resolve(adminUser);
       }
 
@@ -103,7 +130,12 @@ export const AppProvider = ({ children }) => {
         setUser(userData);
         setIsAuthenticated(true);
         localStorage.setItem('user', JSON.stringify(userData));
+        localStorage.setItem('token', data.token);
         
+        // Fetch health data for regular users after successful login
+        if (data.user.role === 'user') {
+          await fetchHealthData(data.user.id);
+        }
         return Promise.resolve(userData);
       } else {
         throw new Error(data.message);
@@ -123,29 +155,50 @@ export const AppProvider = ({ children }) => {
   // Health data functions
   const addHealthData = async (data) => {
     try {
+      // Convert string values to appropriate types
+      const payload = {
+        userId: user?.id,
+        age: parseInt(data.age, 10),
+        weight: parseFloat(data.weight),
+        height: parseFloat(data.height),
+        activityLevel: data.activityLevel,
+        allergies: data.allergies || 'None',
+        medicalHistory: data.medicalConditions || data.medicalHistory || 'None',
+        dietaryPreferences: data.dietaryPreferences || 'None',
+        healthGoal: data.goals || data.healthGoal || 'Maintain weight'
+      };
+
+      console.log('Submitting health data:', payload);
+
       const response = await fetch('http://localhost:8080/healthdata', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          age: data.age,
-          weight: data.weight,
-          height: data.height,
-          activityLevel: data.activityLevel,
-          allergies: data.allergies,
-          medicalHistory: data.medicalConditions || data.medicalHistory,
-          dietaryPreferences: data.dietaryPreferences,
-          healthGoal: data.goals || data.healthGoal,
-        }),
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
       });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server error:', response.status, errorText);
+        throw new Error(`Failed to submit health data: ${response.status} ${errorText}`);
+      }
+
       const savedData = await response.json();
-      setHealthData([...healthData, savedData]);
+      console.log('Health data saved:', savedData);
+      
+      // Update local state with the new data
+      setHealthData(prevData => [...prevData, savedData]);
+      
+      // Show success notification
       addNotification('success', 'Health data submitted successfully');
-      addAuditLog('create', 'health_data', `Health data created for user ${user.name}`);
-      return Promise.resolve(savedData);
+      addAuditLog('create', 'health_data', `Health data created for user ${user?.name}`);
+      
+      return savedData;
     } catch (error) {
       console.error('Add health data error:', error);
+      addNotification('error', error.message || 'Failed to submit health data');
       throw error;
     }
   };
@@ -527,6 +580,9 @@ export const AppProvider = ({ children }) => {
     users,
     auditLogs,
     healthData,
+    addHealthData,
+    updateHealthData,
+    deleteHealthData,
     dietPlans,
     appointments,
     scheduleAppointment,

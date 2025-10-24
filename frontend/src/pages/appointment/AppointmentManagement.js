@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import { format, parseISO } from 'date-fns';
-import { Search, Calendar, Clock, User, Phone, Mail, Filter, Plus, Edit, Trash2, Check, X, RefreshCw, Eye } from 'lucide-react';
+import { Search, Calendar, Clock, User, Phone, Mail, Filter, Plus, Edit, Trash2, Check, X, RefreshCw, Eye, Download } from 'lucide-react';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -18,6 +18,8 @@ const AppointmentManagement = () => {
   const { user } = useApp();
   // State for managing appointments, filters, and UI
   const [appointments, setAppointments] = useState([]);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [users, setUsers] = useState(new Map()); // Map of all users by ID
   const [patients, setPatients] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,42 +70,55 @@ const AppointmentManagement = () => {
       console.log(`Successfully loaded ${appointmentsList.length} appointments`);
       
       // Now fetch users to get patient and doctor information
-      const usersResponse = await fetch('http://localhost:8080/api/users', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        credentials: 'include'
-      });
-      
-      if (usersResponse.ok) {
-        const usersData = await usersResponse.json();
-        console.log('Raw users data:', usersData);
+      try {
+        const token = localStorage.getItem('token');
+        const usersResponse = await fetch('http://localhost:8080/api/users', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          credentials: 'include'
+        });
         
-        // Extract patients and doctors from users
-        let usersList = [];
-        if (Array.isArray(usersData)) {
-          usersList = usersData;
-        } else if (usersData && Array.isArray(usersData.users)) {
-          usersList = usersData.users;
+        if (!usersResponse.ok) {
+          const errorText = await usersResponse.text();
+          console.error('Failed to fetch users:', usersResponse.status, errorText);
+          throw new Error(`Failed to fetch users: ${usersResponse.status} ${errorText}`);
         }
         
-        console.log('Processed users list:', usersList);
-        console.log('First user in list:', usersList[0]);
+        const responseData = await usersResponse.json();
+        console.log('Users data:', responseData);
         
-        // Include both 'user' and 'patient' roles for patients
+        // Handle the response format from the backend
+        const usersList = responseData.users || [];
+        
+        // Map of user IDs to user objects for quick lookup
+        const usersMap = new Map();
+        usersList.forEach(user => {
+          if (user && user.id) {
+            usersMap.set(String(user.id), user);
+          }
+        });
+        
+        // Filter users by role
         const patientsList = usersList.filter(u => 
-          ['user', 'patient', 'USER', 'PATIENT'].includes(u.role)
-        );
-        const doctorsList = usersList.filter(u => 
-          ['doctor', 'DOCTOR'].includes(u.role)
+          u.role && ['user', 'patient', 'USER', 'PATIENT'].includes(u.role)
         );
         
+        const doctorsList = usersList.filter(u => 
+          u.role && ['doctor', 'DOCTOR'].includes(u.role)
+        );
+        
+        setUsers(usersMap);
         setPatients(patientsList);
         setDoctors(doctorsList);
-      } else {
-        console.warn('Failed to fetch users, continuing without user data');
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        // Continue with empty lists if there's an error
+        setUsers(new Map());
+        setPatients([]);
+        setDoctors([]);
       }
       
     } catch (error) {
@@ -281,91 +296,95 @@ const AppointmentManagement = () => {
     }
   };
 
-  // Format appointment data for the table
-  const formattedAppointments = useMemo(() => {
-    return appointments.map(appt => {
-      // Find the full patient and doctor objects from the state
-      const patientObj = patients.find(p => p.id === appt.patientId) || 
-                        (typeof appt.patient === 'object' ? appt.patient : { name: 'Unknown Patient' });
-      
-      const doctorObj = doctors.find(d => d.id === appt.doctorId) || 
-                       (typeof appt.doctor === 'object' ? appt.doctor : { name: 'Unknown Doctor' });
-      
-      // Ensure we have the required fields
-      const patient = {
-        id: patientObj.id || appt.patientId || 0,
-        name: patientObj.name || 'Unknown Patient',
-        phone: patientObj.phone || 'N/A',
-        email: patientObj.email || 'N/A'
-      };
-      
-      const doctor = {
-        id: doctorObj.id || appt.doctorId || 0,
-        name: doctorObj.name || 'Unknown Doctor',
-        specialization: doctorObj.specialization || 'General Practitioner'
-      };
-      
-      // Format status to uppercase for consistency
-      const status = (appt.status || 'scheduled').toUpperCase();
-      const type = appt.type || 'checkup';
-      const notes = appt.notes || appt.description || '';
-      
-      // Format date if it exists
-      let formattedDate = 'N/A';
-      if (appt.appointmentDate) {
-        try {
-          const date = new Date(appt.appointmentDate);
-          if (!isNaN(date.getTime())) {
-            formattedDate = format(date, 'MMM d, yyyy');
-          }
-        } catch (e) {
-          console.error('Error formatting date:', e);
-        }
-      }
-      
-      return {
-        ...appt,
-        patient,
-        doctor,
-        status,
-        type,
-        notes,
-        formattedDate
-      };
-    });
-  }, [appointments, patients, doctors]);
-
-  // Process and filter appointments data
+  // Process and format appointments data
   const processedAppointments = useMemo(() => {
-    if (!appointments || !Array.isArray(appointments)) return [];
+    console.log('Processing appointments...');
+    if (!appointments || !Array.isArray(appointments)) {
+      console.log('No appointments data or invalid format');
+      return [];
+    }
     
     return appointments.map(appt => {
       try {
-        // Safely extract patient and doctor data
-        let patient = {};
-        let doctor = {};
+        // Safely extract patient and doctor information with fallbacks
+        let patientName = 'Unknown Patient';
+        let patientId = '';
+        let patientPhone = '';
+        let patientEmail = '';
         
-        // Handle different possible data structures
-        if (appt.patientId && Array.isArray(patients)) {
-          patient = patients.find(p => p.id === appt.patientId) || appt.patient || {};
-        } else if (appt.patient) {
-          patient = typeof appt.patient === 'object' ? appt.patient : { name: appt.patient };
+        let doctorName = 'Unknown Doctor';
+        let doctorId = '';
+        let doctorSpecialization = 'General Practitioner';
+
+        // Get patient information - check all possible ID fields
+        const patientIdToFind = 
+          appt.patientId || 
+          (typeof appt.patient === 'object' ? (appt.patient?.id || appt.patient?._id) : appt.patient) ||
+          (appt.patientId ? String(appt.patientId) : null);
+          
+        if (patientIdToFind) {
+          // First try to find in patients array
+          const foundPatient = patients?.find(p => {
+            return (p.id && String(p.id) === String(patientIdToFind)) || 
+                   (p._id && String(p._id) === String(patientIdToFind));
+          });
+          
+          if (foundPatient) {
+            patientName = foundPatient.fullName || foundPatient.name || 'Unknown Patient';
+            patientId = String(foundPatient.id || foundPatient._id || '');
+            patientPhone = foundPatient.phone || foundPatient.phoneNumber || '';
+            patientEmail = foundPatient.email || '';
+          } 
+          // Check for embedded patient object
+          else if (appt.patient && typeof appt.patient === 'object') {
+            const embeddedPatient = appt.patient;
+            patientName = embeddedPatient.fullName || embeddedPatient.name || 'Unknown Patient';
+            patientId = String(embeddedPatient.id || embeddedPatient._id || patientIdToFind);
+            patientPhone = embeddedPatient.phone || embeddedPatient.phoneNumber || '';
+            patientEmail = embeddedPatient.email || '';
+          } else {
+            patientId = String(patientIdToFind);
+          }
         }
-        
-        if (appt.doctorId && Array.isArray(doctors)) {
-          doctor = doctors.find(d => d.id === appt.doctorId) || appt.doctor || {};
-        } else if (appt.doctor) {
-          doctor = typeof appt.doctor === 'object' ? appt.doctor : { name: appt.doctor };
+
+        // Get doctor information - check all possible ID fields
+        const doctorIdToFind = 
+          appt.doctorId || 
+          (typeof appt.doctor === 'object' ? (appt.doctor?.id || appt.doctor?._id) : appt.doctor) ||
+          (appt.doctorId ? String(appt.doctorId) : null);
+          
+        if (doctorIdToFind) {
+          // First try to find in doctors array
+          const foundDoctor = doctors?.find(d => 
+            (d.id && String(d.id) === String(doctorIdToFind)) || 
+            (d._id && String(d._id) === String(doctorIdToFind))
+          );
+          
+          if (foundDoctor) {
+            doctorName = foundDoctor.fullName || foundDoctor.name || 'Unknown Doctor';
+            doctorId = String(foundDoctor.id || foundDoctor._id || '');
+            doctorSpecialization = foundDoctor.specialization || 'General Practitioner';
+          } 
+          // Check for embedded doctor object
+          else if (appt.doctor && typeof appt.doctor === 'object') {
+            const embeddedDoctor = appt.doctor;
+            doctorName = embeddedDoctor.fullName || embeddedDoctor.name || 'Unknown Doctor';
+            doctorId = String(embeddedDoctor.id || embeddedDoctor._id || doctorIdToFind);
+            doctorSpecialization = embeddedDoctor.specialization || 'General Practitioner';
+          } else {
+            doctorId = String(doctorIdToFind);
+          }
         }
-        
-        // Format appointment date
+
+        // Parse and format the date
         let appointmentDate = new Date();
         let formattedDate = 'N/A';
         let formattedTime = 'N/A';
         
-        if (appt.appointmentDate || appt.date) {
+        const dateValue = appt.appointmentDate || appt.dateTime || appt.date;
+        if (dateValue) {
           try {
-            appointmentDate = new Date(appt.appointmentDate || appt.date);
+            appointmentDate = new Date(dateValue);
             if (!isNaN(appointmentDate.getTime())) {
               formattedDate = format(appointmentDate, 'MMM d, yyyy');
               formattedTime = format(appointmentDate, 'h:mm a');
@@ -374,44 +393,61 @@ const AppointmentManagement = () => {
             console.error('Error formatting date:', e);
           }
         }
-        
-        // Ensure we have all required fields with defaults
+
+        // Create the formatted appointment object
         return {
-          id: appt.id || Math.random().toString(36).substr(2, 9),
+          id: String(appt.id || appt._id || ''),
           patient: {
-            id: patient.id || 0,
-            name: patient.name || patient.fullName || 'Unknown Patient',
-            phone: patient.phone || patient.phoneNumber || 'N/A',
-            email: patient.email || 'N/A'
+            id: patientId,
+            name: patientName,
+            phone: patientPhone || 'N/A',
+            email: patientEmail || 'N/A'
           },
           doctor: {
-            id: doctor.id || 0,
-            name: doctor.name || doctor.fullName || 'Unknown Doctor',
-            specialization: doctor.specialization || 'General Practitioner'
+            id: doctorId,
+            name: doctorName,
+            specialization: doctorSpecialization
           },
           appointmentDate: appointmentDate,
           formattedDate: formattedDate,
           formattedTime: formattedTime,
-          status: (appt.status || 'PENDING').toUpperCase(),
-          type: appt.type || 'General Checkup',
-          notes: appt.notes || appt.description || ''
+          type: String(appt.type || 'Checkup'),
+          status: String(appt.status || 'scheduled').toUpperCase(),
+          notes: String(appt.notes || appt.description || ''),
+          rawData: appt // Keep the raw data for reference
         };
       } catch (error) {
-        console.error('Error processing appointment:', appt, error);
-        return null;
+        console.error('Error processing appointment:', error, appt);
+        // Return a safe default object if there's an error
+        return {
+          id: String(appt.id || appt._id || 'error'),
+          patient: { id: '0', name: 'Error loading patient', phone: 'N/A', email: 'N/A' },
+          doctor: { id: '0', name: 'Error loading doctor' },
+          appointmentDate: new Date(),
+          formattedDate: 'N/A',
+          formattedTime: 'N/A',
+          type: 'Error',
+          status: 'ERROR',
+          notes: 'Error loading appointment data',
+          rawData: appt
+        };
       }
     }).filter(Boolean); // Remove any null entries from processing errors
   }, [appointments, patients, doctors]);
 
   // Filter and sort appointments
   const filteredAppointments = useMemo(() => {
-    if (!processedAppointments || !Array.isArray(processedAppointments)) return [];
+    console.log('Filtering appointments...');
+    if (!processedAppointments || !Array.isArray(processedAppointments)) {
+      console.log('No processed appointments to filter');
+      return [];
+    }
     
     let result = [...processedAppointments];
     
-    // Apply search filter
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
+    // Apply search filter if search term exists
+    if (searchTerm && searchTerm.trim() !== '') {
+      const searchLower = searchTerm.toLowerCase().trim();
       result = result.filter(appt => {
         if (!appt) return false;
         
@@ -421,40 +457,56 @@ const AppointmentManagement = () => {
           (appt.patient?.phone?.includes(searchTerm)) ||
           (appt.id?.toString().includes(searchTerm)) ||
           (appt.notes && appt.notes.toLowerCase().includes(searchLower)) ||
-          (appt.type && appt.type.toLowerCase().includes(searchLower))
+          (appt.type && appt.type.toLowerCase().includes(searchLower)) ||
+          (appt.status && appt.status.toLowerCase().includes(searchLower))
         );
       });
     }
     
-    // Sort by appointment date by default (newest first)
-    result.sort((a, b) => {
-      if (!a || !b) return 0;
-      return new Date(b.appointmentDate) - new Date(a.appointmentDate);
-    });
-    
+    console.log(`Filtered to ${result.length} appointments`);
     return result;
   }, [processedAppointments, searchTerm]);
   
   // Handle table sorting
-  const [sortConfig, setSortConfig] = useState({ key: 'appointmentDate', direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState({ key: 'appointmentDate', direction: 'desc' });
   
   // Refresh data function
-  const refreshData = () => {
+  const refreshData = useCallback(() => {
+    console.log('Refreshing data...');
     setSearchTerm('');
     fetchAppointments();
-  };
+  }, [fetchAppointments]);
   
   const sortedAppointments = useMemo(() => {
+    console.log('Sorting appointments...');
+    if (!filteredAppointments || !Array.isArray(filteredAppointments)) {
+      console.log('No appointments to sort');
+      return [];
+    }
+    
     const sortableItems = [...filteredAppointments];
+    
     if (sortConfig.key) {
       sortableItems.sort((a, b) => {
-        let aValue = a[sortConfig.key];
-        let bValue = b[sortConfig.key];
+        let aValue, bValue;
+        
+        // Handle nested properties (e.g., patient.name)
+        if (sortConfig.key.includes('.')) {
+          const keys = sortConfig.key.split('.');
+          aValue = keys.reduce((obj, key) => (obj && obj[key] !== undefined) ? obj[key] : '', a);
+          bValue = keys.reduce((obj, key) => (obj && obj[key] !== undefined) ? obj[key] : '', b);
+        } else {
+          aValue = a[sortConfig.key];
+          bValue = b[sortConfig.key];
+        }
         
         // Handle date comparison
-        if (sortConfig.key === 'appointmentDate') {
+        if (sortConfig.key === 'appointmentDate' || sortConfig.key.includes('Date')) {
           aValue = aValue ? new Date(aValue).getTime() : 0;
           bValue = bValue ? new Date(bValue).getTime() : 0;
+        } else if (typeof aValue === 'string') {
+          aValue = aValue.toLowerCase();
+          bValue = bValue?.toLowerCase?.() || '';
         }
         
         if (aValue < bValue) {
@@ -466,6 +518,8 @@ const AppointmentManagement = () => {
         return 0;
       });
     }
+    
+    console.log(`Sorted ${sortableItems.length} appointments by ${sortConfig.key} ${sortConfig.direction}`);
     return sortableItems;
   }, [filteredAppointments, sortConfig]);
   
@@ -792,13 +846,16 @@ const AppointmentManagement = () => {
         if (!value) return <div className="text-gray-500">No patient</div>;
         
         const patient = typeof value === 'object' ? value : { name: String(value) };
-        const displayName = patient.name || 'Unknown Patient';
-        const displayPhone = patient.phone || patient.phoneNumber || 'N/A';
+        const displayName = String(patient.name || 'Unknown Patient');
+        const displayPhone = String(patient.phone || patient.phoneNumber || 'N/A');
+        const initials = displayName && typeof displayName === 'string' && displayName.length > 0 
+          ? displayName.charAt(0).toUpperCase() 
+          : '?';
         
         return (
           <div className="flex items-center">
             <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400 font-medium mr-3 flex-shrink-0">
-              {displayName.charAt(0).toUpperCase()}
+              {initials}
             </div>
             <div className="min-w-0">
               <div className="font-medium text-gray-900 dark:text-white truncate" title={displayName}>
@@ -820,13 +877,16 @@ const AppointmentManagement = () => {
         if (!value) return <div className="text-gray-500">No doctor</div>;
         
         const doctor = typeof value === 'object' ? value : { name: String(value) };
-        const displayName = doctor.name || 'Unknown Doctor';
-        const displaySpecialization = doctor.specialization || 'General Practitioner';
+        const displayName = String(doctor.name || 'Unknown Doctor');
+        const displaySpecialization = String(doctor.specialization || 'General Practitioner');
+        const initials = displayName && typeof displayName === 'string' && displayName.length > 0 
+          ? displayName.charAt(0).toUpperCase() 
+          : '?';
         
         return (
           <div className="flex items-center">
             <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center text-purple-600 dark:text-purple-400 font-medium mr-3 flex-shrink-0">
-              {displayName.charAt(0).toUpperCase()}
+              {initials}
             </div>
             <div className="min-w-0">
               <div className="font-medium text-gray-900 dark:text-white truncate" title={`Dr. ${displayName}`}>
@@ -1072,6 +1132,193 @@ const AppointmentManagement = () => {
     }
   };
 
+  const generateAppointmentReport = async () => {
+    try {
+      setGeneratingReport(true);
+      const { jsPDF } = await import('jspdf');
+      const autoTable = (await import('jspdf-autotable')).default;
+      
+      // Initialize PDF with professional settings
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      // Colors
+      const primaryColor = [63, 81, 181];
+      const secondaryColor = [33, 150, 243];
+      const lightGray = [248, 249, 250];
+      const darkGray = [52, 58, 64];
+      
+      // Document dimensions
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 10;
+      const headerHeight = 50;
+      const tableStartY = 65;
+
+      // Add header with gradient
+      doc.setFillColor(...primaryColor);
+      doc.rect(0, 0, pageWidth, headerHeight, 'F');
+      
+      // Add logo and title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(24);
+      doc.setTextColor(255, 255, 255);
+      doc.text('HEALTHHUB', pageWidth / 2, 25, { align: 'center' });
+      
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'normal');
+      doc.text('APPOINTMENT REPORT', pageWidth / 2, 33, { align: 'center' });
+      
+      // Add report info
+      doc.setFontSize(10);
+      doc.text(`Generated on: ${new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })}`, margin, 45);
+      
+      doc.text(`Total Appointments: ${filteredAppointments.length}`, margin, 50);
+      
+      // Prepare data for the table
+      const tableData = filteredAppointments.map((appt, index) => {
+        const date = appt.appointmentDate ? new Date(appt.appointmentDate) : null;
+        return {
+          id: index + 1,
+          patient: appt.patient?.name || 'N/A',
+          doctor: appt.doctor?.name || 'N/A',
+          date: date ? date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          }) : 'N/A',
+          time: date ? date.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: true 
+          }) : 'N/A',
+          type: appt.type ? appt.type.charAt(0).toUpperCase() + appt.type.slice(1) : 'N/A',
+          status: appt.status ? appt.status.charAt(0).toUpperCase() + appt.status.slice(1) : 'N/A',
+          notes: appt.notes || 'N/A'
+        };
+      });
+
+      // Add table using autoTable with enhanced styling
+      autoTable(doc, {
+        startY: tableStartY,
+        head: [
+          [
+            { content: '#', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Patient', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Doctor', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Date', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Time', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Type', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Status', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } },
+            { content: 'Notes', styles: { fillColor: primaryColor, textColor: 255, fontStyle: 'bold' } }
+          ]
+        ],
+        body: tableData.map(row => [
+          { content: row.id.toString(), styles: { fontStyle: 'bold' } },
+          row.patient,
+          row.doctor,
+          row.date,
+          row.time,
+          row.type,
+          { 
+            content: row.status,
+            styles: { 
+              textColor: row.status === 'Completed' ? [40, 167, 69] :
+                        row.status === 'Cancelled' ? [220, 53, 69] :
+                        row.status === 'Scheduled' ? [255, 193, 7] :
+                        [0, 0, 0]
+            }
+          },
+          row.notes.length > 40 ? row.notes.substring(0, 40) + '...' : row.notes
+        ]),
+        theme: 'grid',
+        headStyles: {
+          fillColor: primaryColor,
+          textColor: 255,
+          fontStyle: 'bold',
+          halign: 'center'
+        },
+        columnStyles: {
+          0: { cellWidth: 35, halign: 'center' },   // ID
+          1: { cellWidth: 35, halign: 'left' },     // Patient
+          2: { cellWidth: 35, halign: 'left' },     // Doctor
+          3: { cellWidth: 35, halign: 'center' },   // Date
+          4: { cellWidth: 35, halign: 'center' },   // Time
+          5: { cellWidth: 35, halign: 'center' },   // Type
+          6: { cellWidth: 35, halign: 'center' },   // Status
+          7: { cellWidth: 35, halign: 'left',       // Notes
+              cellPadding: { left: 5, right: 2, top: 2, bottom: 2 } }
+        },
+        styles: {
+          fontSize: 9,
+          cellPadding: 4,
+          lineColor: [221, 221, 221],
+          lineWidth: 0.2,
+          overflow: 'linebreak',
+          valign: 'middle'
+        },
+        alternateRowStyles: {
+          fillColor: [248, 249, 250]
+        },
+        margin: { 
+          top: 10,
+          right: margin,
+          bottom: 20,
+          left: margin 
+        },
+        didDrawPage: (data) => {
+          // Footer
+          const pageCount = doc.internal.getNumberOfPages();
+          const currentPage = data.pageNumber;
+          
+          doc.setFontSize(8);
+          doc.setTextColor(100);
+          doc.text(
+            `Page ${currentPage} of ${pageCount} • Generated by HealthHub • ${new Date().toLocaleDateString()}`,
+            pageWidth / 2,
+            doc.internal.pageSize.getHeight() - 10,
+            { align: 'center' }
+          );
+        }
+      });
+      
+      // Add watermark
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(80);
+        doc.setTextColor(230, 230, 230);
+        doc.setFont('helvetica', 'bold');
+        doc.setGState(new doc.GState({ opacity: 0.1 }));
+        doc.text('HEALTHHUB', 
+          pageWidth / 2, 
+          doc.internal.pageSize.getHeight() / 2, 
+          { angle: 45, align: 'center' }
+        );
+        doc.setGState(new doc.GState({ opacity: 1 }));
+      }
+      
+      // Save the PDF with a timestamp in the filename
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      doc.save(`HealthHub_Appointments_${timestamp}.pdf`);
+      
+      toast.success('Report generated successfully!');
+    } catch (error) {
+      console.error('Error generating report:', error);
+      toast.error('Failed to generate report. Please try again.');
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
@@ -1119,13 +1366,28 @@ const AppointmentManagement = () => {
                 {loading ? 'Refreshing...' : 'Refresh'}
               </Button>
               
-              <Button
-                onClick={handleNewAppointment}
-                className="px-4 py-2 text-sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                New Appointment
-              </Button>
+              <div className="flex space-x-2">
+                <Button
+                  onClick={handleNewAppointment}
+                  className="px-4 py-2 text-sm"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Appointment
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={generateAppointmentReport}
+                  disabled={generatingReport || appointments.length === 0}
+                  className="px-4 py-2 text-sm border-gray-300 hover:bg-gray-50"
+                >
+                  {generatingReport ? (
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  {generatingReport ? 'Generating...' : 'Download Report'}
+                </Button>
+              </div>
             </div>
           </div>
           
@@ -1172,7 +1434,7 @@ const AppointmentManagement = () => {
             <div className="overflow-x-auto">
               <Table
                 columns={columns}
-                data={filteredAppointments}
+                data={sortedAppointments}
                 defaultPageSize={10}
                 className="min-w-full"
                 pagination
@@ -1238,7 +1500,9 @@ const AppointmentManagement = () => {
                 </label>
                 <div className="flex items-center space-x-3">
                   <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center text-purple-600 dark:text-purple-400 font-medium flex-shrink-0">
-                    {selectedAppointment.doctor?.name?.charAt(0) || 'D'}
+                    {selectedAppointment.doctor?.name && typeof selectedAppointment.doctor.name === 'string' && selectedAppointment.doctor.name.length > 0 
+                      ? selectedAppointment.doctor.name.charAt(0).toUpperCase() 
+                      : 'D'}
                   </div>
                   <div className="flex-1">
                     <Select
@@ -1408,7 +1672,9 @@ const AppointmentManagement = () => {
                   <div className="mt-1">
                     <div className="flex items-center space-x-3">
                       <div className="h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400 text-lg font-medium">
-                        {selectedAppointment.patient?.name?.charAt(0) || 'P'}
+                        {selectedAppointment.patient?.name && typeof selectedAppointment.patient.name === 'string' && selectedAppointment.patient.name.length > 0 
+                          ? selectedAppointment.patient.name.charAt(0).toUpperCase() 
+                          : 'P'}
                       </div>
                       <div>
                         <p className="text-lg font-medium text-gray-900 dark:text-white">
@@ -1427,7 +1693,9 @@ const AppointmentManagement = () => {
                   <div className="mt-1">
                     <div className="flex items-center space-x-3">
                       <div className="h-12 w-12 rounded-full bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center text-purple-600 dark:text-purple-400 text-lg font-medium">
-                        {selectedAppointment.doctor?.name?.charAt(0) || 'D'}
+                        {selectedAppointment.doctor?.name && typeof selectedAppointment.doctor.name === 'string' && selectedAppointment.doctor.name.length > 0 
+                          ? selectedAppointment.doctor.name.charAt(0).toUpperCase() 
+                          : 'D'}
                       </div>
                       <div>
                         <p className="text-lg font-medium text-gray-900 dark:text-white">

@@ -29,6 +29,8 @@ const HealthData = () => {
   });
   const [errors, setErrors] = useState({});
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
 
   useEffect(() => {
@@ -97,7 +99,10 @@ const HealthData = () => {
         navigate('/dashboard');
       }, 2000);
     } catch (error) {
-      toast.error(isEditMode ? 'Failed to update health data' : 'Failed to submit health data');
+      console.error('Form submission error:', error);
+      setErrorMessage(error.message || (isEditMode ? 'Failed to update health data' : 'Failed to submit health data'));
+      setShowError(true);
+      setTimeout(() => setShowError(false), 5000); // Hide error after 5 seconds
     }
   };
 
@@ -136,6 +141,12 @@ const HealthData = () => {
         />
       )}
 
+      {showError && (
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <p className="font-bold">Error!</p>
+          <p>{errorMessage}</p>
+        </div>
+      )}
       <Card>
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

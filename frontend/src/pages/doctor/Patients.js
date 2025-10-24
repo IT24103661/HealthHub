@@ -14,7 +14,9 @@ import {
   FileText,
   Stethoscope,
   Activity,
-  UserPlus
+  UserPlus,
+  Download,
+  RefreshCw
 } from 'lucide-react';
 import AssignDietitianModal from './components/AssignDietitianModal';
 import { format, parseISO } from 'date-fns';
@@ -68,6 +70,7 @@ const Patients = () => {
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [assignmentError, setAssignmentError] = useState('');
+  const [generatingReport, setGeneratingReport] = useState(false);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -339,6 +342,151 @@ const Patients = () => {
     return age;
   };
 
+  const generatePatientsReport = async () => {
+    try {
+      setGeneratingReport(true);
+      const { jsPDF } = await import('jspdf');
+      
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 10;
+      const tableTop = 40;
+      
+      // Add header
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(63, 81, 181);
+      doc.text('PATIENTS REPORT - HEALTHHUB', pageWidth / 2, 15, { align: 'center' });
+      
+      // Report info
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, margin, 25);
+      doc.text(`Total Patients: ${filteredPatients.length}`, margin, 30);
+      
+      // Table headers
+      const headers = [
+        'Patient',
+        'Contact',
+        'Age / Gender',
+        'Status',
+        'Last Visit',
+        'Diagnosis'
+      ];
+      
+      const colWidths = [40, 50, 25, 25, 30, 50];
+      const headerY = tableTop;
+      
+      // Draw header background
+      doc.setFillColor(63, 81, 181);
+      doc.rect(margin, headerY, pageWidth - (margin * 2), 10, 'F');
+      
+      // Add header text
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      
+      let xPos = margin + 5;
+      headers.forEach((header, index) => {
+        doc.text(header, xPos, headerY + 7);
+        xPos += colWidths[index] + 5;
+      });
+      
+      // Add data rows
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      
+      let yPos = tableTop + 15;
+      
+      filteredPatients.forEach((patient, index) => {
+        if (yPos > 180) { // Check for page break
+          doc.addPage();
+          yPos = 30;
+        }
+        
+        // Alternate row color
+        const isEven = index % 2 === 0;
+        doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 248, isEven ? 255 : 248);
+        doc.rect(margin, yPos - 5, pageWidth - (margin * 2), 10, 'F');
+        
+        // Draw cell data
+        xPos = margin + 5;
+        
+        // Patient Name
+        doc.text(patient.fullName || 'N/A', xPos, yPos);
+        xPos += colWidths[0] + 5;
+        
+        // Contact Info
+        const contactInfo = [
+          patient.email || 'No email',
+          patient.phone || 'No phone'
+        ].filter(Boolean).join(' | ');
+        doc.text(contactInfo, xPos, yPos);
+        xPos += colWidths[1] + 5;
+        
+        // Age / Gender
+        const age = patient.dob ? calculateAge(patient.dob) : 'N/A';
+        const gender = patient.gender || '';
+        doc.text(`${age}${gender ? ` | ${gender}` : ''}`, xPos, yPos);
+        xPos += colWidths[2] + 5;
+        
+        // Status with color coding
+        const status = patient.status || 'active';
+        const statusColor = 
+          status.toLowerCase() === 'active' ? [25, 135, 84] :
+          status.toLowerCase() === 'inactive' ? [220, 53, 69] :
+          [13, 110, 253];
+        
+        doc.setTextColor(...statusColor);
+        doc.text(status.charAt(0).toUpperCase() + status.slice(1).toLowerCase(), xPos, yPos);
+        doc.setTextColor(0, 0, 0);
+        xPos += colWidths[3] + 5;
+        
+        // Last Visit
+        const lastVisit = patient.prescriptionDate 
+          ? format(new Date(patient.prescriptionDate), 'MMM d, yyyy')
+          : 'N/A';
+        doc.text(lastVisit, xPos, yPos);
+        xPos += colWidths[4] + 5;
+        
+        // Diagnosis (truncated)
+        const diagnosis = patient.diagnosis || 'No diagnosis recorded';
+        const maxDxLength = 50;
+        const truncatedDx = diagnosis.length > maxDxLength 
+          ? diagnosis.substring(0, maxDxLength) + '...' 
+          : diagnosis;
+        doc.text(truncatedDx, xPos, yPos);
+        
+        yPos += 7;
+      });
+      
+      // Add footer
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${i} of ${pageCount} • Generated by HealthHub`,
+          pageWidth / 2,
+          doc.internal.pageSize.getHeight() - 10,
+          { align: 'center' }
+        );
+      }
+      
+      // Save the PDF
+      const reportDate = new Date().toISOString().split('T')[0];
+      doc.save('patients-report-' + reportDate + '.pdf');
+      
+    } catch (error) {
+      console.error('Error generating report:', error);
+      toast.error('Failed to generate report. Please try again.');
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8">
       <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover />
@@ -352,13 +500,31 @@ const Patients = () => {
               Manage your patients and their medical records
             </p>
           </div>
-          <div className="mt-4 flex md:mt-0 md:ml-4">
+          <div className="mt-4 flex space-x-3 md:mt-0 md:ml-4">
             <button
               type="button"
               className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
               <Filter className="-ml-1 mr-2 h-4 w-4 text-gray-500" />
               Filter
+            </button>
+            <button
+              type="button"
+              onClick={generatePatientsReport}
+              disabled={generatingReport || filteredPatients.length === 0}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {generatingReport ? (
+                <>
+                  <RefreshCw className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Download className="-ml-1 mr-2 h-4 w-4 text-blue-600" />
+                  Download Report
+                </>
+              )}
             </button>
           </div>
         </div>

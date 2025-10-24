@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -60,6 +60,14 @@ public class User {
     @OneToMany(mappedBy = "assignedDietitian", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private List<User> assignedPatients = new ArrayList<>();
+
+    @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonManagedReference("patient-appointments")
+    private List<Appointment> patientAppointments = new ArrayList<>();
+
+    @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonManagedReference("doctor-appointments")
+    private List<Appointment> doctorAppointments = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {
