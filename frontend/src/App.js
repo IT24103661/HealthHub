@@ -4,6 +4,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import HealthData from './pages/HealthData';
 import DietPlans from './pages/DietPlans';
@@ -60,6 +61,7 @@ function AppRoutes() {
   return (
     <Routes>
       {/* Public Routes */}
+      <Route path="/" element={<Home />} />
       <Route
         path="/login"
         element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
