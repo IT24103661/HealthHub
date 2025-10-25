@@ -104,6 +104,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/health-data/edit/:id"
+        element={
+          <ProtectedRoute allowedRoles={['user']}>
+            <HealthData />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/schedule-checkup"
         element={
           <ProtectedRoute allowedRoles={['user']}>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import Card from '../components/Card';
 import Input from '../components/Input';
 import Select from '../components/Select';
@@ -11,10 +11,13 @@ import { User, Scale, Ruler, Calendar, Activity } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const HealthData = () => {
-  const { addHealthData, updateHealthData } = useApp();
+  const { addHealthData, updateHealthData, healthData } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
-  const editData = location.state?.editData;
+  const { id } = useParams();
+  const editDataFromState = location.state?.editData;
+  const editDataFromId = id ? healthData.find(item => item.id === parseInt(id)) : null;
+  const editData = editDataFromState || editDataFromId;
   
   const [formData, setFormData] = useState({
     age: '',

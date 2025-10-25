@@ -277,7 +277,7 @@ const Dashboard = () => {
           <Button
             size="sm"
             variant="primary"
-            onClick={() => navigate('/health-data', { state: { editData: row } })}
+            onClick={() => navigate(`/health-data/edit/${row.id}`)}
             title="Edit"
             className="p-1"
           >
