@@ -226,14 +226,29 @@ const AppointmentManagement = () => {
       // Create a copy of the updates to avoid mutating the original
       const requestData = { ...updates };
       
-      // Format the dateTime to match backend expectations (yyyy-MM-dd HH:mm)
-      if (requestData.dateTime) {
-        const date = new Date(requestData.dateTime);
-        if (!isNaN(date.getTime())) {
-          // Format as yyyy-MM-dd HH:mm
-          const pad = num => num.toString().padStart(2, '0');
-          requestData.dateTime = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      // Remove any undefined or null values
+      Object.keys(requestData).forEach(key => {
+        if (requestData[key] === undefined || requestData[key] === null || requestData[key] === '') {
+          delete requestData[key];
         }
+      });
+
+      // Handle date and time
+      if (requestData.date && requestData.time) {
+        // Combine date and time from form inputs
+        const [year, month, day] = requestData.date.split('-').map(Number);
+        const [hours, minutes] = requestData.time.split(':').map(Number);
+        const date = new Date(year, month - 1, day, hours, minutes);
+        
+        // Format as ISO string without timezone offset (Z)
+        const pad = num => num.toString().padStart(2, '0');
+        const isoString = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+        
+        requestData.appointmentDate = isoString;
+        
+        // Remove the separate date and time fields as they're not needed in the backend
+        delete requestData.date;
+        delete requestData.time;
       }
       
       console.log('Updating appointment with data:', requestData);
@@ -616,12 +631,45 @@ const AppointmentManagement = () => {
     }) || appointment.doctor || null;
     
     // Parse the appointment date
-    const appointmentDate = appointment.appointmentDate ? new Date(appointment.appointmentDate) : new Date();
-    
-    // Format time for the time input (HH:MM)
+    let appointmentDate;
     let timeValue = '09:00';
-    if (appointment.formattedTime) {
-      // If we have a formatted time, convert it to 24-hour format if needed
+    
+    // Handle different date formats from the backend
+    if (appointment.appointmentDate) {
+      // Handle ISO string with or without timezone
+      appointmentDate = new Date(appointment.appointmentDate);
+      
+      // If the date is invalid, try parsing it as a local date string
+      if (isNaN(appointmentDate.getTime())) {
+        // Try parsing as 'yyyy-MM-dd HH:mm' format
+        const dateParts = appointment.appointmentDate.split(/[-T: ]/);
+        if (dateParts.length >= 5) {
+          appointmentDate = new Date(
+            parseInt(dateParts[0]),
+            parseInt(dateParts[1]) - 1,
+            parseInt(dateParts[2]),
+            parseInt(dateParts[3] || 0),
+            parseInt(dateParts[4] || 0)
+          );
+        }
+      }
+      
+      // If we still don't have a valid date, use current date
+      if (isNaN(appointmentDate.getTime())) {
+        appointmentDate = new Date();
+      }
+      
+      // Format time as HH:mm
+      timeValue = `${appointmentDate.getHours().toString().padStart(2, '0')}:${appointmentDate.getMinutes().toString().padStart(2, '0')}`;
+    } else {
+      appointmentDate = new Date();
+    }
+    
+    // Override with explicit time if provided
+    if (appointment.time) {
+      timeValue = appointment.time;
+    } else if (appointment.formattedTime) {
+      // Handle 12-hour format if present
       const timeParts = appointment.formattedTime.match(/(\d+):(\d+)(?::\d+)?(?:\s*([ap]m))?/i);
       if (timeParts) {
         let hours = parseInt(timeParts[1], 10);
@@ -634,23 +682,21 @@ const AppointmentManagement = () => {
         
         // Format as HH:MM
         timeValue = `${hours.toString().padStart(2, '0')}:${minutes}`;
-      } else {
-        timeValue = appointment.formattedTime; // Fallback to original if parsing fails
       }
-    } else if (appointment.appointmentDate) {
-      // Otherwise, format the time from the appointment date
-      timeValue = format(appointmentDate, 'HH:mm');
     }
     
     const updatedAppointment = {
       ...appointment,
+      id: appointment.id || appointment._id, // Ensure we have the correct ID field
       patient: patientWithName,
       doctor,
       patientId: appointment.patientId || appointment.patient?._id || appointment.patient?.id,
       doctorId: appointment.doctorId || appointment.doctor?._id || appointment.doctor?.id,
       date: format(appointmentDate, 'yyyy-MM-dd'),
       time: timeValue,
-      name: getPatientName(patientWithName || appointment.patient)
+      name: getPatientName(patientWithName || appointment.patient),
+      // Preserve the original appointment date for reference
+      originalAppointmentDate: appointment.appointmentDate || appointment.date
     };
     
     console.log('Setting selected appointment:', updatedAppointment);
@@ -1045,11 +1091,6 @@ const AppointmentManagement = () => {
     try {
       console.log('Form submission started');
       
-      // Ensure we have valid date and time strings
-      if (!selectedAppointment.date || !selectedAppointment.time) {
-        throw new Error('Date and time are required');
-      }
-      
       // Get date and time from the form
       const dateStr = selectedAppointment.date;
       const timeStr = selectedAppointment.time;
@@ -1093,11 +1134,22 @@ const AppointmentManagement = () => {
       const appointmentData = {
         patientId: patientId,
         doctorId: doctorId,
-        appointmentDate: formattedDateTime, // Full ISO-8601 formatted date
+        date: dateStr, // Used for form handling
+        time: timeStr, // Used for form handling
+        appointmentDate: formattedDateTime, // Will be formatted in updateAppointment
         type: selectedAppointment.type || 'checkup',
         notes: selectedAppointment.notes || '',
         status: (selectedAppointment.status || 'scheduled').toUpperCase()
       };
+      
+      // Remove any undefined or empty values
+      Object.keys(appointmentData).forEach(key => {
+        if (appointmentData[key] === undefined || appointmentData[key] === null || appointmentData[key] === '') {
+          delete appointmentData[key];
+        }
+      });
+      
+      console.log('Prepared appointment data:', JSON.stringify(appointmentData, null, 2));
       
       console.log('Sending to backend:', JSON.stringify(appointmentData, null, 2));
 
