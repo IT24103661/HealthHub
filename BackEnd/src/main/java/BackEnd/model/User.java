@@ -8,7 +8,10 @@ import jakarta.validation.constraints.Size;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
-import com.fasterxml.jackson.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -17,6 +20,11 @@ import java.util.Objects;
 @Table(name = "users")
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIdentityInfo(
+  generator = ObjectIdGenerators.PropertyGenerator.class,
+  property = "id"
+)
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class User {
 
     @Id
@@ -62,11 +70,11 @@ public class User {
     private List<User> assignedPatients = new ArrayList<>();
 
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonManagedReference("patient-appointments")
+    @JsonIgnore
     private List<Appointment> patientAppointments = new ArrayList<>();
 
     @OneToMany(mappedBy = "doctor", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonManagedReference("doctor-appointments")
+    @JsonIgnore
     private List<Appointment> doctorAppointments = new ArrayList<>();
 
     @PrePersist

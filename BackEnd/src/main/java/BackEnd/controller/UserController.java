@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.BindingResult;
 
 import java.util.HashMap;
 import java.util.List;
@@ -15,7 +16,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"}, 
+             allowedHeaders = "*", 
+             allowCredentials = "true")
 @RequestMapping("/api/users")
 public class UserController {
 
@@ -127,15 +130,38 @@ public class UserController {
     }
 
     // Create new user (admin only)
-    @PostMapping
-    public ResponseEntity<?> createUser(@Valid @RequestBody User newUser) {
+    @PostMapping(consumes = {"application/json"}, produces = {"application/json"})
+    public ResponseEntity<?> createUser(@Valid @RequestBody User newUser, BindingResult bindingResult) {
+        System.out.println("=== CREATE USER REQUEST ===");
+        
         Map<String, Object> response = new HashMap<>();
+        
+        // Handle validation errors
+        if (bindingResult.hasErrors()) {
+            List<String> errors = bindingResult.getFieldErrors().stream()
+                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .collect(Collectors.toList());
+            
+            System.out.println("Validation errors: " + errors);
+            response.put("success", false);
+            response.put("message", "Validation failed");
+            response.put("errors", errors);
+            return ResponseEntity.badRequest().body(response);
+        }
+        
+        // Log the incoming user data
+        System.out.println("Email: " + newUser.getEmail());
+        System.out.println("Name: " + newUser.getFullName());
+        System.out.println("Role: " + newUser.getRole());
+        System.out.println("Incoming user data: " + newUser.toString());
 
         try {
             // Check if email already exists
             if (userRepository.existsByEmail(newUser.getEmail())) {
+                String errorMsg = "Email " + newUser.getEmail() + " is already registered";
+                System.out.println(errorMsg);
                 response.put("success", false);
-                response.put("message", "Email already registered");
+                response.put("message", errorMsg);
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
             }
 
@@ -143,8 +169,10 @@ public class UserController {
             String role = newUser.getRole().toLowerCase();
             if (!role.equals("user") && !role.equals("doctor") && 
                 !role.equals("dietitian") && !role.equals("receptionist") && !role.equals("admin")) {
+                String errorMsg = "Invalid role: " + role + ". Must be one of: user, doctor, dietitian, receptionist, admin";
+                System.out.println(errorMsg);
                 response.put("success", false);
-                response.put("message", "Invalid role. Must be one of: user, doctor, dietitian, receptionist, admin");
+                response.put("message", errorMsg);
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
             }
 

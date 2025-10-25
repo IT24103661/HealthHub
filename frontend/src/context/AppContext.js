@@ -138,7 +138,7 @@ export const AppProvider = ({ children }) => {
         }
         return Promise.resolve(userData);
       } else {
-        throw new Error(data.message);
+        throw new Error(data.message || 'Invalid credentials');
       }
     } catch (error) {
       console.error('Login error:', error);
@@ -390,41 +390,68 @@ export const AppProvider = ({ children }) => {
 
   const createUser = async (userData) => {
     try {
-      const response = await fetch('http://localhost:8080/api/auth/signup', {
+      const token = localStorage.getItem('token');
+      const requestBody = {
+        fullName: userData.name || userData.fullName, // Handle both name and fullName for backward compatibility
+        email: userData.email,
+        password: userData.password,
+        role: userData.role || 'user',
+        phone: userData.phone || null,
+        age: userData.age ? parseInt(userData.age) : null,
+        status: userData.status || 'active'
+      };
+      
+      // Validate required fields
+      if (!requestBody.fullName) {
+        throw new Error('Full name is required');
+      }
+      
+      console.log('Sending user data:', requestBody);
+      
+      const headers = new Headers();
+      headers.append('Content-Type', 'application/json');
+      headers.append('Accept', 'application/json');
+      if (token) {
+        headers.append('Authorization', `Bearer ${token}`);
+      }
+      
+      const response = await fetch('http://localhost:8080/api/users', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fullName: userData.name,
-          email: userData.email,
-          password: userData.password || 'defaultPassword123',
-          role: userData.role,
-          phone: userData.phone || null,
-          age: userData.age || null,
-        }),
+        headers: headers,
+        mode: 'cors',
+        credentials: 'include',
+        body: JSON.stringify(requestBody)
       });
 
-      const data = await response.json();
+      const responseData = await response.json().catch(() => ({
+        success: false,
+        message: 'Failed to parse server response'
+      }));
+      
+      console.log('Server response:', { status: response.status, data: responseData });
+      
+      if (!response.ok) {
+        throw new Error(responseData.message || `HTTP error! status: ${response.status}`);
+      }
 
-      if (data.success) {
+      if (responseData.success) {
         // Also update local state
         const newUser = {
-          id: data.user.id,
-          name: data.user.fullName,
-          email: data.user.email,
-          role: data.user.role,
-          phone: data.user.phone,
-          age: data.user.age,
-          status: data.user.status,
-          createdAt: new Date(data.user.createdAt),
+          id: responseData.user.id,
+          fullName: responseData.user.fullName,
+          email: responseData.user.email,
+          role: responseData.user.role,
+          phone: responseData.user.phone,
+          age: responseData.user.age,
+          status: responseData.user.status,
+          createdAt: responseData.user.createdAt ? new Date(responseData.user.createdAt) : new Date(),
         };
-        setUsers([...users, newUser]);
+        setUsers(prevUsers => [...prevUsers, newUser]);
         addNotification('success', 'User created successfully');
-        addAuditLog('create', 'user', `User ${userData.name} created with role ${userData.role}`);
-        return Promise.resolve(newUser);
+        addAuditLog('create', 'user', `User ${userData.fullName} created with role ${userData.role}`);
+        return newUser;
       } else {
-        throw new Error(data.message);
+        throw new Error(responseData.message || 'Unknown error occurred while creating user');
       }
     } catch (error) {
       console.error('Create user error:', error);

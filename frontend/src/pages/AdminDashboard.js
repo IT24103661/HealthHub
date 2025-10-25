@@ -6,15 +6,25 @@ import Table from '../components/Table';
 import Badge from '../components/Badge';
 import Modal from '../components/Modal';
 import Select from '../components/Select';
-import { Users, Shield, Trash2, Edit, Ban, CheckCircle, Download } from 'lucide-react';
+import { Users, Shield, Trash2, Edit, Ban, CheckCircle, Download, Plus } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const AdminDashboard = () => {
-  const { users, updateUserStatus, updateUserRole, deleteUser } = useApp();
+  const { users, updateUserStatus, updateUserRole, deleteUser, createUser } = useApp();
   const [selectedUser, setSelectedUser] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [editForm, setEditForm] = useState({ role: '', status: '' });
+  const [newUser, setNewUser] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    role: 'user',
+    phone: '',
+    age: '',
+    status: 'active'
+  });
 
   const handleEditUser = (user) => {
     setSelectedUser(user);
@@ -44,6 +54,47 @@ const AdminDashboard = () => {
     toast.success('User deleted successfully');
     setShowDeleteModal(false);
     setSelectedUser(null);
+  };
+
+  const handleAddUser = async (e) => {
+    e.preventDefault();
+    try {
+      // Prepare user data in the format expected by the backend
+      const userData = {
+        fullName: newUser.fullName,
+        email: newUser.email,
+        password: newUser.password,
+        role: newUser.role || 'user',
+        phone: newUser.phone || null,
+        age: newUser.age ? parseInt(newUser.age) : null,
+        status: newUser.status || 'active'
+      };
+      
+      await createUser(userData);
+      toast.success('User created successfully');
+      setShowAddModal(false);
+      setNewUser({
+        fullName: '',
+        email: '',
+        password: '',
+        role: 'user',
+        phone: '',
+        age: '',
+        status: 'active'
+      });
+      
+      // The users list will be automatically updated via the context
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to create user');
+    }
+  };
+
+  const handleNewUserChange = (e) => {
+    const { name, value } = e.target;
+    setNewUser(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const downloadUsersReport = async () => {
@@ -615,7 +666,18 @@ const AdminDashboard = () => {
       </div>
 
       {/* Users Table */}
-      <Card title="All Users">
+      <Card>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-medium text-gray-900">All Users</h3>
+          <Button 
+            onClick={() => setShowAddModal(true)}
+            size="sm"
+            variant="primary"
+            icon={Plus}
+          >
+            Add User
+          </Button>
+        </div>
         <Table columns={columns} data={users} />
       </Card>
 
@@ -702,6 +764,126 @@ const AdminDashboard = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Add User Modal */}
+      <Modal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="Add New User"
+        size="md"
+      >
+        <form onSubmit={handleAddUser} className="space-y-4">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Full Name</label>
+            <input
+              type="text"
+              name="fullName"
+              value={newUser.fullName}
+              onChange={handleNewUserChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+              required
+              minLength={3}
+              maxLength={100}
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Email</label>
+            <input
+              type="email"
+              name="email"
+              value={newUser.email}
+              onChange={handleNewUserChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+              required
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Password</label>
+            <input
+              type="password"
+              name="password"
+              value={newUser.password}
+              onChange={handleNewUserChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+              required
+            />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Phone</label>
+              <input
+                type="tel"
+                name="phone"
+                value={newUser.phone}
+                onChange={handleNewUserChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Age</label>
+              <input
+                type="number"
+                name="age"
+                value={newUser.age}
+                onChange={handleNewUserChange}
+                min="0"
+                max="120"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Role</label>
+              <select
+                name="role"
+                value={newUser.role}
+                onChange={handleNewUserChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                required
+              >
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+                <option value="doctor">Doctor</option>
+                <option value="dietitian">Dietitian</option>
+                <option value="receptionist">Receptionist</option>
+              </select>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Status</label>
+              <select
+                name="status"
+                value={newUser.status}
+                onChange={handleNewUserChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                required
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+          
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowAddModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary">
+              Create User
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* System Logs */}
